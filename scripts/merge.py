@@ -20,6 +20,7 @@ GEO_CACHE = ROOT / "scripts" / "geo_cache.json"
 STATE_FILE = ROOT / "scripts" / "sources_state.json"
 OUT_PLAIN = ROOT / "output" / "merged.txt"
 OUT_B64 = ROOT / "output" / "merged.base64.txt"
+OUT_HAPP = ROOT / "output" / "happ_link.txt"
 
 UA = "Mozilla/5.0 (compatible; V-Merge-Bot/1.0)"
 
@@ -338,6 +339,40 @@ def send_telegram_notification(message):
         print(f"[!] Ошибка при отправке уведомления в Telegram: {e}", file=sys.stderr)
 
 
+def encrypt_happ_link(raw_url):
+    api_url = "https://crypto.happ.su/api-v2.php"
+    
+    payload = json.dumps({"url": raw_url}).encode("utf-8")
+    
+    req = urllib.request.Request(
+        api_url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": UA
+        },
+        method="POST"
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            if response.status == 200:
+                response_data = json.loads(response.read().decode("utf-8"))
+                encrypted_link = response_data.get("encrypted_link")
+                if encrypted_link and encrypted_link.startswith("happ://crypt5/"):
+                    print("[✓] Ссылка Happ успешно создана.")
+                    return encrypted_link
+                else:
+                    print(f"[!] API Happ вернул неожиданный ответ: {response_data}")
+                    return None
+            else:
+                print(f"[!] Ошибка API Happ: HTTP {response.status}")
+                return None
+    except Exception as e:
+        print(f"[!] Ошибка при запросе к API Happ: {e}")
+        return None
+
+
 def main():
     force = FORCE_REBUILD or ("--force" in sys.argv)
 
@@ -429,6 +464,17 @@ def main():
     )
     print(f"[✓] {OUT_PLAIN} ({len(renamed)} шт.)")
     print(f"[✓] {OUT_B64}")
+
+    print("[i] Запрос к API Happ для шифрования ссылки...")
+    raw_merged_url = "https://raw.githubusercontent.com/AlexanderRU44/V-Merge.github.io/refs/heads/main/output/merged.txt"
+    
+    encrypted_link = encrypt_happ_link(raw_merged_url)
+    
+    if encrypted_link:
+        OUT_HAPP.write_text(encrypted_link, encoding="utf-8")
+        print(f"[✓] {OUT_HAPP}")
+    else:
+        print("[!] Не удалось создать ссылку Happ.")
 
     send_telegram_notification(
         f"🚀 *V-Merge успешно обновлен!*\n\n"
