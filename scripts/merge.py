@@ -471,7 +471,9 @@ def main():
     encrypted_link = encrypt_happ_link(raw_merged_url)
     
     if encrypted_link:
-        OUT_HAPP.write_text(encrypted_link, encoding="utf-8")
+        # Сохраняем данные для бота: ссылка | время | количество
+        happ_data = f"{encrypted_link}|{current_time}|{len(renamed)}"
+        OUT_HAPP.write_text(happ_data, encoding="utf-8")
         print(f"[✓] {OUT_HAPP}")
     else:
         print("[!] Не удалось создать ссылку Happ.")
