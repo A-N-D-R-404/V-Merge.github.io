@@ -45,12 +45,13 @@ jobs:
 
           git add output/merged.txt \
                   output/merged.base64.txt \
+                  output/happ_link.txt \
                   scripts/geo_cache.json \
                   scripts/sources_state.json
 
           if git diff --cached --quiet; then
             echo "Нет изменений — коммит не нужен"
           else
-            git commit -m "auto: update configs + geo cache + state [skip ci]"
+            git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
             git push
           fi
