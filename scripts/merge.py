@@ -466,7 +466,7 @@ def main():
     print(f"[✓] {OUT_B64}")
 
     print("[i] Запрос к API Happ для шифрования ссылки...")
-    raw_merged_url = "https://raw.githubusercontent.com/AlexanderRU44/V-Merge.github.io/refs/heads/main/output/merged.txt"
+   raw_merged_url = "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt"
     
     encrypted_link = encrypt_happ_link(raw_merged_url)
     
