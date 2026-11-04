@@ -56,14 +56,6 @@ def fetch(url, timeout=30):
         return r.read().decode("utf-8", errors="ignore")
 
 
-def b64decode_any(text):
-    """Декодирует Base64, поддерживая URL-safe алфавит (- и _)."""
-    cleaned = re.sub(r"\s+", "", text)
-    cleaned = cleaned.replace("-", "+").replace("_", "/")
-    cleaned += "=" * (-len(cleaned) % 4)
-    return base64.b64decode(cleaned).decode("utf-8", errors="ignore")
-
-
 def decode_subscription(text):
     text = text.strip()
     if not text:
@@ -71,7 +63,9 @@ def decode_subscription(text):
     if "://" in text:
         return text
     try:
-        decoded = b64decode_any(text)
+        cleaned = re.sub(r"\s+", "", text)
+        cleaned += "=" * (-len(cleaned) % 4)
+        decoded = base64.b64decode(cleaned).decode("utf-8", errors="ignore")
         if "://" in decoded:
             return decoded
     except Exception:
@@ -175,7 +169,10 @@ def parse_link(link):
     try:
         if link.startswith("vmess://"):
             b64 = link[len("vmess://"):]
-            data = json.loads(b64decode_any(b64))
+            b64 += "=" * (-len(b64) % 4)
+            data = json.loads(
+                base64.b64decode(b64).decode("utf-8", errors="ignore")
+            )
             host = (data.get("add") or data.get("host") or "").strip().lower()
             port = str(data.get("port", "")).strip()
             return "vmess", host, port
@@ -207,7 +204,9 @@ def rename_link(link, tag):
     if link.startswith("vmess://"):
         try:
             b64 = link[len("vmess://"):]
-            data = json.loads(b64decode_any(b64))
+            b64 += "=" * (-len(b64) % 4)
+            raw = base64.b64decode(b64).decode("utf-8", errors="ignore")
+            data = json.loads(raw)
             data["ps"] = tag
             new_b64 = base64.b64encode(
                 json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -342,9 +341,9 @@ def send_telegram_notification(message):
 
 def encrypt_happ_link(raw_url):
     api_url = "https://crypto.happ.su/api-v2.php"
-
+    
     payload = json.dumps({"url": raw_url}).encode("utf-8")
-
+    
     req = urllib.request.Request(
         api_url,
         data=payload,
@@ -354,7 +353,7 @@ def encrypt_happ_link(raw_url):
         },
         method="POST"
     )
-
+    
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             if response.status == 200:
@@ -468,19 +467,13 @@ def main():
 
     print("[i] Запрос к API Happ для шифрования ссылки...")
     raw_merged_url = "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt"
-
+    
     encrypted_link = encrypt_happ_link(raw_merged_url)
-
+    
     if encrypted_link:
-        happ_data = {
-            "encrypted_link": encrypted_link,
-            "updated_at": current_time,
-            "config_count": len(renamed),
-        }
-        OUT_HAPP.write_text(
-            json.dumps(happ_data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        # Сохраняем данные для бота: ссылка | время | количество
+        happ_data = f"{encrypted_link}|{current_time}|{len(renamed)}"
+        OUT_HAPP.write_text(happ_data, encoding="utf-8")
         print(f"[✓] {OUT_HAPP}")
     else:
         print("[!] Не удалось создать ссылку Happ.")
