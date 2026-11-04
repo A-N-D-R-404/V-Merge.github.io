@@ -45,7 +45,7 @@
 
             let happLink = rawUrl;
 
-            // Проверяем, не передали ли нам JSON (как в вашем случае)
+            // Если передали JSON (из happ_link.txt), извлекаем ссылку
             if (rawUrl.trim().startsWith('{')) {
                 try {
                     const data = JSON.parse(rawUrl);
@@ -60,12 +60,12 @@
                 happLink = decodeURIComponent(happLink);
             } catch (e) {}
 
-            // Если протокол happ:// потерялся
+            // Если протокол happ:// потерялся при передаче
             if (happLink.startsWith("crypt")) {
                 happLink = "happ://" + happLink;
             }
 
-            // Финальная проверка
+            // Проверка, что это действительно happ-ссылка
             if (!happLink || !happLink.startsWith("happ://")) {
                 titleEl.innerText = "Ошибка: недопустимая ссылка.";
                 descEl.innerText = "Не удалось извлечь happ-ссылку.";

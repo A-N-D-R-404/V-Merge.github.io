@@ -388,15 +388,14 @@ def main():
         print("[!] sources.txt пустой", file=sys.stderr)
         return 0
 
+    # Проверяем изменения, но теперь это не блокирует сборку
     changed, new_state, cached = check_sources_changed(urls, force=force)
     save_state(new_state)
 
-    if not changed:
-        print("[✓] Источники не изменились. Пересборка не требуется.")
-        if not OUT_PLAIN.exists():
-            print("[i] output/merged.txt отсутствует — собираю принудительно")
-        else:
-            return 0
+    if changed:
+        print("[+] Источники изменились. Загружаю новые данные...")
+    else:
+        print("[=] Источники не изменились, но сборка запускается принудительно.")
 
     all_links = []
     for url in urls:
@@ -443,6 +442,7 @@ def main():
         tag = f"{flag(cc)} {cc} #{counter[cc]}"
         renamed.append(rename_link(link, tag))
 
+    # Время всегда будет новым
     current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
     metadata_header = (
         "#profile-title: V-Merge 🚀\n"
@@ -470,13 +470,22 @@ def main():
     
     encrypted_link = encrypt_happ_link(raw_merged_url)
     
-    if encrypted_link:
-        # Сохраняем данные для бота: ссылка | время | количество
-        happ_data = f"{encrypted_link}|{current_time}|{len(renamed)}"
-        OUT_HAPP.write_text(happ_data, encoding="utf-8")
-        print(f"[✓] {OUT_HAPP}")
-    else:
-        print("[!] Не удалось создать ссылку Happ.")
+    if not encrypted_link:
+        print("[!] API Happ не ответил. Использую резервную ссылку (fallback).")
+        encrypted_link = raw_merged_url
+
+    happ_data = {
+        "encrypted_link": encrypted_link,
+        "updated_at": current_time,
+        "config_count": len(renamed)
+    }
+    
+    OUT_HAPP.write_text(
+        json.dumps(happ_data, ensure_ascii=False, indent=2), 
+        encoding="utf-8"
+    )
+    
+    print(f"[✓] {OUT_HAPP} (ссылка: {encrypted_link[:30]}...)")
 
     send_telegram_notification(
         f"🚀 *V-Merge успешно обновлен!*\n\n"

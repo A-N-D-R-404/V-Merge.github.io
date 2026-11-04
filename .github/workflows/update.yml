@@ -49,12 +49,10 @@ jobs:
                   scripts/geo_cache.json \
                   scripts/sources_state.json
 
-          if git diff --cached --quiet; then
-            echo "Нет изменений — коммит не нужен"
-          else
-            git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
-            git push
-          fi
+          # Так как время в merged.txt меняется при каждом запуске, 
+          # коммит будет создаваться всегда. Убираем проверку --quiet.
+          git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
+          git push
 
       - name: Trigger Bot Broadcast
         run: |
