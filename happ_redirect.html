@@ -33,15 +33,26 @@
     <script>
         (function () {
             const urlParams = new URLSearchParams(window.location.search);
-            let happLink = urlParams.get('url');
+            let rawUrl = urlParams.get('url');
             const titleEl = document.querySelector('h2');
             const descEl = document.querySelector('p');
 
-            // Если ссылки вообще нет
-            if (!happLink) {
+            if (!rawUrl) {
                 titleEl.innerText = "Ошибка: ссылка не найдена.";
                 descEl.innerText = "";
                 return;
+            }
+
+            let happLink = rawUrl;
+
+            // Проверяем, не передали ли нам JSON (как в вашем случае)
+            if (rawUrl.trim().startsWith('{')) {
+                try {
+                    const data = JSON.parse(rawUrl);
+                    happLink = data.encrypted_link || data.link || "";
+                } catch (e) {
+                    console.error("Ошибка парсинга JSON из URL", e);
+                }
             }
 
             // Декодируем на случай, если ссылка была закодирована
@@ -49,14 +60,15 @@
                 happLink = decodeURIComponent(happLink);
             } catch (e) {}
 
-            // Если протокол happ:// потерялся (например, из-за Telegram или парсинга URL),
-            // принудительно добавляем его.
+            // Если протокол happ:// потерялся
             if (happLink.startsWith("crypt")) {
                 happLink = "happ://" + happLink;
-            } else if (!happLink.startsWith("happ://")) {
-                // Если пришло что-то совсем странное
+            }
+
+            // Финальная проверка
+            if (!happLink || !happLink.startsWith("happ://")) {
                 titleEl.innerText = "Ошибка: недопустимая ссылка.";
-                descEl.innerText = "Ссылка не является ключом Happ.";
+                descEl.innerText = "Не удалось извлечь happ-ссылку.";
                 return;
             }
 
