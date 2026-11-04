@@ -27,23 +27,40 @@
     <div class="loader"></div>
     <h2>Открываем Happ...</h2>
     <p>Если приложение не открылось, нажмите кнопку ниже.</p>
-    
-    <a id="fallback-link" href="#">Открыть вручную</a>
+
+    <a id="fallback-link" href="#" style="display:none;">Открыть вручную</a>
 
     <script>
-        // Берем ссылку happ://crypt5/... из адресной строки (?url=...)
-        const urlParams = new URLSearchParams(window.location.search);
-        const happLink = urlParams.get('url');
+        (function () {
+            const urlParams = new URLSearchParams(window.location.search);
+            const happLink = urlParams.get('url');
+            const titleEl = document.querySelector('h2');
+            const descEl = document.querySelector('p');
 
-        if (happLink) {
-            // Устанавливаем ссылку для ручного нажатия
-            document.getElementById('fallback-link').href = happLink;
-            
+            // Защита: ссылка должна начинаться с happ://
+            if (!happLink) {
+                titleEl.innerText = "Ошибка: ссылка не найдена.";
+                descEl.innerText = "";
+                return;
+            }
+
+            if (!happLink.startsWith("happ://")) {
+                titleEl.innerText = "Ошибка: недопустимая ссылка.";
+                descEl.innerText = "Ссылка должна начинаться с happ://";
+                return;
+            }
+
+            const fallback = document.getElementById('fallback-link');
+            fallback.href = happLink;
+            fallback.style.display = 'block';
+
             // Пытаемся автоматически открыть Happ
-            window.location.href = happLink;
-        } else {
-            document.querySelector('h2').innerText = "Ошибка: ссылка не найдена.";
-        }
+            try {
+                window.location.href = happLink;
+            } catch (e) {
+                console.warn("Не удалось автоматически открыть Happ:", e);
+            }
+        })();
     </script>
 </body>
 </html>

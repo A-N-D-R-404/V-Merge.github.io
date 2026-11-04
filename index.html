@@ -89,7 +89,6 @@
 
         #status { margin-top: 6px; font-size: 0.75em; font-family: monospace; color: #8b949e; }
 
-        /* Мобильная адаптация */
         @media (max-width: 900px) {
             html, body { overflow: auto !important; height: auto; }
             body { padding: 10px; }
@@ -164,6 +163,8 @@
         const MERGED_URL = "output/merged.txt";
         const GEO_URL    = "https://raw.githubusercontent.com/AlexanderRU44/V-Merge.github.io/refs/heads/main/scripts/geo_cache.json";
 
+        const TYPE_ORDER = { vless: 1, vmess: 2, trojan: 3, ss: 4, hysteria2: 5 };
+
         let allRows = [];
         let visibleRows = [];
         let sortKey = null;
@@ -183,6 +184,12 @@
                 A + (cc.charCodeAt(0) - 65),
                 A + (cc.charCodeAt(1) - 65)
             );
+        }
+
+        function b64DecodeAny(str) {
+            let s = str.replace(/-/g, "+").replace(/_/g, "/");
+            s += "=".repeat((4 - (s.length % 4)) % 4);
+            return atob(s);
         }
 
         async function loadGeoCache() {
@@ -205,16 +212,19 @@
             return geoCache[String(host).trim().toLowerCase()] || "XX";
         }
 
-        function hostFromVmess(link) {
+        function parseVmess(link) {
             try {
-                let b64 = link.slice("vmess://".length).split('#')[0];
-                b64 += "=".repeat((4 - (b64.length % 4)) % 4);
-                const json = atob(b64);
-                const data = JSON.parse(json);
-                return data.add || data.host || "";
+                const b64 = link.slice("vmess://".length).split('#')[0];
+                const json = b64DecodeAny(b64);
+                return JSON.parse(json);
             } catch (e) {
-                return "";
+                return null;
             }
+        }
+
+        function hostFromVmess(link) {
+            const data = parseVmess(link);
+            return data ? (data.add || data.host || "") : "";
         }
 
         function parseMerged(text) {
@@ -227,15 +237,13 @@
                 if (line.includes("://")) {
                     const type = line.split("://", 1)[0].toLowerCase();
                     let address = "", port = "";
-                    
+
                     if (type === "vmess") {
-                        address = hostFromVmess(line);
-                        try {
-                            let b64 = line.slice("vmess://".length).split('#')[0];
-                            b64 += "=".repeat((4 - (b64.length % 4)) % 4);
-                            const data = JSON.parse(atob(b64));
+                        const data = parseVmess(line);
+                        if (data) {
+                            address = data.add || data.host || "";
                             port = String(data.port || "");
-                        } catch (e) {}
+                        }
                     } else {
                         try {
                             const cleanLine = line.split('#')[0];
@@ -251,13 +259,13 @@
                             port = p || "";
                         }
                     }
-                    
+
                     rows.push({
                         num: rows.length + 1,
                         type,
                         address,
                         port,
-                        rawLink: line // Сохраняем исходную полную ссылку со всеми параметрами
+                        rawLink: line
                     });
                 }
             }
@@ -338,6 +346,11 @@
                 if (sortKey === "num" || sortKey === "port") {
                     va = parseInt(va, 10) || 0;
                     vb = parseInt(vb, 10) || 0;
+                    return (va - vb) * sortDir;
+                }
+                if (sortKey === "type") {
+                    va = TYPE_ORDER[a.type] || 99;
+                    vb = TYPE_ORDER[b.type] || 99;
                     return (va - vb) * sortDir;
                 }
                 va = String(va).toLowerCase();
@@ -423,10 +436,12 @@
             if (!visibleRows.length) return;
             const text = visibleRows.map(r => r.rawLink).join('\n');
             const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = url;
             a.download = 'configs.txt';
             a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         loadConfigs();
