@@ -61,5 +61,5 @@ jobs:
           curl -X POST \
             -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/AlexanderRU44/V-Merge-Bot/dispatches \
+            https://api.github.com/repos/A-N-D-R-404/V-Merge-Bot/dispatches \
             -d '{"event_type": "configs_updated"}'
