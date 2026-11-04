@@ -33,20 +33,30 @@
     <script>
         (function () {
             const urlParams = new URLSearchParams(window.location.search);
-            const happLink = urlParams.get('url');
+            let happLink = urlParams.get('url');
             const titleEl = document.querySelector('h2');
             const descEl = document.querySelector('p');
 
-            // Защита: ссылка должна начинаться с happ://
+            // Если ссылки вообще нет
             if (!happLink) {
                 titleEl.innerText = "Ошибка: ссылка не найдена.";
                 descEl.innerText = "";
                 return;
             }
 
-            if (!happLink.startsWith("happ://")) {
+            // Декодируем на случай, если ссылка была закодирована
+            try {
+                happLink = decodeURIComponent(happLink);
+            } catch (e) {}
+
+            // Если протокол happ:// потерялся (например, из-за Telegram или парсинга URL),
+            // принудительно добавляем его.
+            if (happLink.startsWith("crypt")) {
+                happLink = "happ://" + happLink;
+            } else if (!happLink.startsWith("happ://")) {
+                // Если пришло что-то совсем странное
                 titleEl.innerText = "Ошибка: недопустимая ссылка.";
-                descEl.innerText = "Ссылка должна начинаться с happ://";
+                descEl.innerText = "Ссылка не является ключом Happ.";
                 return;
             }
 
