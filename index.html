@@ -33,9 +33,9 @@
         }
         .toolbar button:hover { opacity: 0.85; }
         .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-refresh { background: #238636; color: white; }
+        .btn-refresh { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
         .btn-copy { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
-        .btn-download { background: #1f6feb; color: white; }
+        .btn-bot { background: #238636; color: white; }
 
         .container { display: flex; gap: 12px; flex-grow: 1; min-height: 0; }
 
@@ -125,7 +125,7 @@
         <div style="display:flex; gap:6px; width:100%; margin-top:4px;">
             <button class="btn-refresh" id="btnRefresh" onclick="loadConfigs()" style="flex:1;">🔄 Обновить</button>
             <button class="btn-copy" id="btnCopy" onclick="copyToClipboard()" disabled style="flex:1;">Копировать</button>
-            <button class="btn-download" id="btnDownload" onclick="downloadTxt()" disabled style="flex:1;">Скачать TXT</button>
+            <button class="btn-bot" id="btnBot" onclick="openBot()" disabled style="flex:1;">🤖 Получить в Happ</button>
         </div>
     </div>
 
@@ -257,7 +257,7 @@
                         type,
                         address,
                         port,
-                        rawLink: line // Сохраняем исходную полную ссылку со всеми параметрами
+                        rawLink: line
                     });
                 }
             }
@@ -406,7 +406,7 @@
         function updateButtons() {
             const has = visibleRows.length > 0;
             document.getElementById('btnCopy').disabled = !has;
-            document.getElementById('btnDownload').disabled = !has;
+            document.getElementById('btnBot').disabled = !has;
         }
 
         function copyToClipboard() {
@@ -419,14 +419,9 @@
             });
         }
 
-        function downloadTxt() {
-            if (!visibleRows.length) return;
-            const text = visibleRows.map(r => r.rawLink).join('\n');
-            const blob = new Blob([text], { type: 'text/plain' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'configs.txt';
-            a.click();
+        // Открываем бота для получения подписки
+        function openBot() {
+            window.open('https://t.me/V_Merge_VPN_Bot', '_blank');
         }
 
         loadConfigs();
