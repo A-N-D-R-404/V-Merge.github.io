@@ -317,11 +317,11 @@ def update_geo_cache(hosts, geo):
 
 
 def send_telegram_notification(message):
+    """Оставлена для совместимости, но больше не вызывается в main()"""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
-        print("[i] Telegram секреты не найдены, пропускаем отправку уведомления.")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -334,9 +334,9 @@ def send_telegram_notification(message):
     try:
         req = urllib.request.Request(url, data=data, method="POST")
         with urllib.request.urlopen(req, timeout=10):
-            print("[✓] Уведомление в Telegram успешно отправлено!")
+            print("[✓] Уведомление в Telegram отправлено!")
     except Exception as e:
-        print(f"[!] Ошибка при отправке уведомления в Telegram: {e}", file=sys.stderr)
+        print(f"[!] Ошибка при отправке в Telegram: {e}", file=sys.stderr)
 
 
 def encrypt_happ_link(raw_url):
@@ -388,7 +388,6 @@ def main():
         print("[!] sources.txt пустой", file=sys.stderr)
         return 0
 
-    # Проверяем изменения, но теперь это не блокирует сборку
     changed, new_state, cached = check_sources_changed(urls, force=force)
     save_state(new_state)
 
@@ -442,12 +441,13 @@ def main():
         tag = f"{flag(cc)} {cc} #{counter[cc]}"
         renamed.append(rename_link(link, tag))
 
-    # Время всегда будет новым
     current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    
+    # ИСПРАВЛЕНА ССЫЛКА НА САЙТ
     metadata_header = (
         "#profile-title: V-Merge 🚀\n"
         f"#announce: Обновлено: {current_time} | Конфигов: {len(renamed)} | Автообновление\n"
-        "#profile-web-page-url: https://alexanderru44.github.io/V-Merge.github.io/\n"
+        "#profile-web-page-url: https://a-n-d-r-404.github.io/V-Merge.github.io/\n"
         "#support-url: https://t.me/V_Merge_VPN\n"
         "#profile-update-interval: 1\n"
     )
@@ -487,11 +487,7 @@ def main():
     
     print(f"[✓] {OUT_HAPP} (ссылка: {encrypted_link[:30]}...)")
 
-    send_telegram_notification(
-        f"🚀 *V-Merge успешно обновлен!*\n\n"
-        f"📅 Время: `{current_time}`\n"
-        f"🔗 Активных конфигураций: `{len(renamed)}`"
-    )
+    # Уведомление в канал отключено (уведомления шлет broadcast.py в V-Merge-Bot)
 
     return 0
 
