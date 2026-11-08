@@ -11,34 +11,34 @@ V-Merge: объединённый скрипт сбора, проверки и �
 5. Переименовывает с флагами и сохраняет в output/merged.txt.
 6. Обновляет output/happ_link.txt через API Happ.
 """
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import datetime
+from json import JSONEncoder
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 import base64
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import re
+import signal
 import socket
+import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import subprocess
-import threading
-import signal
-import logging
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from pathlib import Path
-from dataclasses import dataclass, field
-from json import JSONEncoder
-from typing import List, Dict, Any, Optional
 
-import requests
-import psutil
-import yaml
-from retrying import retry
 from requests import RequestException
+from retrying import retry
+import psutil
+import requests
+import yaml
 
 # ============================================================
 # Пути
@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "scripts" / "sources.txt"
 GEO_CACHE = ROOT / "scripts" / "geo_cache.json"
 STATE_FILE = ROOT / "scripts" / "sources_state.json"
-CONF_PATH = ROOT / "scripts" / "config.json"          # config.json теперь в scripts/
+CONF_PATH = ROOT / "scripts" / "config.json"  # config.json теперь в scripts/
 OUT_PLAIN = ROOT / "output" / "merged.txt"
 OUT_B64 = ROOT / "output" / "merged.base64.txt"
 OUT_HAPP = ROOT / "output" / "happ_link.txt"
@@ -70,36 +70,104 @@ RENAME_ENABLED = True
 FORCE_REBUILD = False
 
 CHECK_ENABLED = True
-TH_MAX_WORKER = 5
-CHECK_TIMEOUT = 10          # секунд на HTTP-запрос через прокси
-CHECK_LOC = True            # определять страну для рабочих конфигов
+TH_MAX_WORKER = 10  # 🚀 Увеличено с 5 до 10 одновременных проверок
+CHECK_TIMEOUT = 10  # секунд на HTTP-запрос через прокси
+CHECK_LOC = True  # определять страну для рабочих конфигов
 
+# 🌍 Расширенная карта флагов стран (ISO 3166-1 alpha-2)
 FLAGS = {
-    "RU": "🇷🇺", "US": "🇺🇸", "DE": "🇩🇪", "NL": "🇳🇱", "FR": "🇫🇷",
-    "GB": "🇬🇧", "FI": "🇫🇮", "SE": "🇸🇪", "TR": "🇹🇷", "JP": "🇯🇵",
-    "KR": "🇰🇷", "SG": "🇸🇬", "CA": "🇨🇦", "PL": "🇵🇱", "UA": "🇺🇦",
-    "KZ": "🇰🇿", "CN": "🇨🇳", "HK": "🇭🇰", "IN": "🇮🇳", "BR": "🇧🇷",
-    "IR": "🇮🇷", "AE": "🇦🇪", "IT": "🇮🇹", "ES": "🇪🇸", "CH": "🇨🇭",
-    "AT": "🇦🇹", "CZ": "🇨🇿", "RO": "🇷🇴", "MD": "🇲🇩", "LV": "🇱🇻",
-    "LT": "🇱🇹", "EE": "🇪🇪", "AM": "🇦🇲", "GE": "🇬🇪", "AZ": "🇦🇿",
-    "IL": "🇮🇱", "AU": "🇦🇺", "NZ": "🇳🇿", "MX": "🇲🇽", "AR": "🇦🇷",
-    "BG": "🇧🇬", "RS": "🇷🇸", "HR": "🇭🇷", "SK": "🇸🇰", "SI": "🇸🇮",
-    "TH": "🇹🇭", "VN": "🇻🇳", "MY": "🇲🇾", "ID": "🇮🇩", "PH": "🇵🇭",
-    "NO": "🇳🇴", "DK": "🇩🇰", "BE": "🇧🇪", "IE": "🇮🇪", "PT": "🇵🇹",
-    "GR": "🇬🇷", "HU": "🇭🇺", "AL": "🇦🇱", "IM": "🇮🇲",
+    "RU": "🇷🇺",
+    "US": "🇺🇸",
+    "DE": "🇩🇪",
+    "NL": "🇳🇱",
+    "FR": "🇫🇷",
+    "GB": "🇬🇧",
+    "FI": "🇫🇮",
+    "SE": "🇸🇪",
+    "TR": "🇹🇷",
+    "JP": "🇯🇵",
+    "KR": "🇰🇷",
+    "SG": "🇸🇬",
+    "CA": "🇨🇦",
+    "PL": "🇵🇱",
+    "UA": "🇺🇦",
+    "KZ": "🇰🇿",
+    "CN": "🇨🇳",
+    "HK": "🇭🇰",
+    "IN": "🇮🇳",
+    "BR": "🇧🇷",
+    "IR": "🇮🇷",
+    "AE": "🇦🇪",
+    "IT": "🇮🇹",
+    "ES": "🇪🇸",
+    "CH": "🇨🇭",
+    "AT": "🇦🇹",
+    "CZ": "🇨🇿",
+    "RO": "🇷🇴",
+    "MD": "🇲🇩",
+    "LV": "🇱🇻",
+    "LT": "🇱🇹",
+    "EE": "🇪🇪",
+    "AM": "🇦🇲",
+    "GE": "🇬🇪",
+    "AZ": "🇦🇿",
+    "IL": "🇮🇱",
+    "AU": "🇦🇺",
+    "NZ": "🇳🇿",
+    "MX": "🇲🇽",
+    "AR": "🇦🇷",
+    "BG": "🇧🇬",
+    "RS": "🇷🇸",
+    "HR": "🇭🇷",
+    "SK": "🇸🇰",
+    "SI": "🇸🇮",
+    "TH": "🇹🇭",
+    "VN": "🇻🇳",
+    "MY": "🇲🇾",
+    "ID": "🇮🇩",
+    "PH": "🇵🇭",
+    "NO": "🇳🇴",
+    "DK": "🇩🇰",
+    "BE": "🇧🇪",
+    "IE": "🇮🇪",
+    "PT": "🇵🇹",
+    "GR": "🇬🇷",
+    "HU": "🇭🇺",
+    "AL": "🇦🇱",
+    "IM": "🇮🇲",
+    "UZ": "🇺🇿",
+    "KG": "🇰🇬",
+    "TW": "🇹🇼",
+    "GE": "🇬🇪",
+    "CY": "🇨🇾",
+    "LU": "🇱🇺",
+    "MT": "🇲🇹",
+    "IS": "🇮🇸",
 }
 
+
 def flag(cc):
-    return FLAGS.get(cc, "🏴")
+    if not cc:
+        return "🏴"
+    code = cc.upper()
+    if code in FLAGS:
+        return FLAGS[code]
+    # Автогенерация из Unicode regional indicator symbols для остальных стран
+    if len(code) == 2 and code.isalpha():
+        return chr(ord(code[0]) + 127397) + chr(ord(code[1]) + 127397)
+    return "🏴"
+
 
 # ============================================================
 # Часть 1: сбор источников
 # ============================================================
 
+
 def fetch(url, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="ignore")
+
 
 def decode_subscription(text):
     text = text.strip()
@@ -117,6 +185,7 @@ def decode_subscription(text):
         pass
     return text
 
+
 RE_FI = re.compile(
     r"обновлено:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?",
     re.IGNORECASE,
@@ -125,6 +194,7 @@ RE_IGARECK = re.compile(
     r"Date/Time:\s*(\d{4})-(\d{2})-(\d{2})\s*/\s*(\d{1,2}):(\d{2})",
     re.IGNORECASE,
 )
+
 
 def parse_source_updated_at(text):
     head = "\n".join(text.splitlines()[:15])
@@ -151,6 +221,7 @@ def parse_source_updated_at(text):
             return None
     return None
 
+
 def load_state():
     if not STATE_FILE.exists():
         return {}
@@ -159,12 +230,14 @@ def load_state():
     except Exception:
         return {}
 
+
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(
         json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
 
 def check_sources_changed(urls, force=False):
     if force:
@@ -181,7 +254,9 @@ def check_sources_changed(urls, force=False):
             dt = parse_source_updated_at(raw)
             prev = old.get(url)
             if dt is None:
-                h = hashlib.md5(raw.encode("utf-8", errors="ignore")).hexdigest()[:12]
+                h = hashlib.md5(
+                    raw.encode("utf-8", errors="ignore")
+                ).hexdigest()[:12]
                 dt = f"hash:{h}"
             if dt != prev:
                 changed = True
@@ -195,12 +270,15 @@ def check_sources_changed(urls, force=False):
             new_state[url] = old.get(url)
     return changed, new_state, contents
 
+
 def parse_link(link):
     try:
         if link.startswith("vmess://"):
-            b64 = link[len("vmess://"):]
+            b64 = link[len("vmess://") :]
             b64 += "=" * (-len(b64) % 4)
-            data = json.loads(base64.b64decode(b64).decode("utf-8", errors="ignore"))
+            data = json.loads(
+                base64.b64decode(b64).decode("utf-8", errors="ignore")
+            )
             host = (data.get("add") or data.get("host") or "").strip().lower()
             port = str(data.get("port", "")).strip()
             return "vmess", host, port
@@ -221,32 +299,40 @@ def parse_link(link):
     except Exception:
         return None, None, None
 
+
 def rename_link(link, tag):
     if not RENAME_ENABLED:
         return link
     if link.startswith("vmess://"):
         try:
-            b64 = link[len("vmess://"):]
+            b64 = link[len("vmess://") :]
             b64 += "=" * (-len(b64) % 4)
             raw = base64.b64decode(b64).decode("utf-8", errors="ignore")
             data = json.loads(raw)
             data["ps"] = tag
-            new_b64 = base64.b64encode(json.dumps(data, ensure_ascii=False).encode("utf-8")).decode()
+            new_b64 = base64.b64encode(
+                json.dumps(data, ensure_ascii=False).encode("utf-8")
+            ).decode()
             return "vmess://" + new_b64
         except Exception:
             return link
     base = link.split("#", 1)[0]
     return f"{base}#{urllib.parse.quote(tag)}"
 
+
 def load_geo():
     if not GEO_CACHE.exists():
         return {}
     try:
         data = json.loads(GEO_CACHE.read_text(encoding="utf-8"))
-        return {str(k).strip().lower(): str(v).strip().upper() for k, v in data.items()}
+        return {
+            str(k).strip().lower(): str(v).strip().upper()
+            for k, v in data.items()
+        }
     except Exception as e:
         print(f"[!] Ошибка чтения geo_cache.json: {e}", file=sys.stderr)
         return {}
+
 
 def save_geo(data):
     GEO_CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +340,7 @@ def save_geo(data):
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
 
 def resolve_ip(host):
     try:
@@ -264,6 +351,7 @@ def resolve_ip(host):
             return socket.gethostbyname(host)
         except Exception:
             return None
+
 
 def lookup_country_ip(ip):
     url = f"http://ip-api.com/json/{ip}?fields=status,countryCode"
@@ -280,6 +368,7 @@ def lookup_country_ip(ip):
     except Exception as e:
         print(f"  [!] ip-api: {e}")
     return "XX"
+
 
 def update_geo_cache(hosts, geo):
     if not GEO_ENABLED:
@@ -321,6 +410,7 @@ def update_geo_cache(hosts, geo):
     print(f"[=] Определено стран: {added} (исправлено XX→страна: {improved})")
     return geo
 
+
 # ============================================================
 # Часть 2: проверка конфигов через Xray/Hysteria
 # ============================================================
@@ -331,12 +421,16 @@ try:
         _cfg = json.load(f)
         TEST_URL = _cfg["core"]["test_url"]
 except Exception as e:
-    print(f"[!] Не удалось загрузить {CONF_PATH}: {e}. Проверка будет отключена.")
+    print(
+        f"[!] Не удалось загрузить {CONF_PATH}: {e}. Проверка будет отключена."
+    )
     TEST_URL = None
     CHECK_ENABLED = False
 
+
 class ProcessManager:
     """Управляет фоновыми процессами Xray/Hysteria."""
+
     def __init__(self):
         self.active_processes = {}
         self.lock = threading.Lock()
@@ -369,9 +463,11 @@ class ProcessManager:
         for name in names:
             self.stop_process(name)
 
+
 process_manager = ProcessManager()
 
 # ---- Парсинг конфигов для Xray ----
+
 
 @dataclass
 class ConfigParams:
@@ -435,9 +531,21 @@ def parse_config_params(config: str) -> ConfigParams:
     tag = urllib.parse.unquote(tag)
 
     protocol = next(
-        (p for p in ["vless", "vmess", "trojan", "hy2", "hysteria2", "ss", "socks", "wireguard"]
-         if main_config.startswith(p + "://")),
-        None
+        (
+            p
+            for p in [
+                "vless",
+                "vmess",
+                "trojan",
+                "hy2",
+                "hysteria2",
+                "ss",
+                "socks",
+                "wireguard",
+            ]
+            if main_config.startswith(p + "://")
+        ),
+        None,
     )
     if not protocol:
         raise ValueError("Неизвестный протокол")
@@ -445,50 +553,69 @@ def parse_config_params(config: str) -> ConfigParams:
     common = {"protocol": protocol, "tag": tag}
 
     if protocol in ("vless", "trojan"):
-        m = re.search(r'([^:]+)@([^:]+):(\d+)', main_config)
+        m = re.search(r"([^:]+)@([^:]+):(\d+)", main_config)
         if m:
-            common.update({
-                "id": m.group(1).replace("//", "") if protocol != "trojan" else "",
-                "address": m.group(2),
-                "port": int(m.group(3)),
-            })
+            common.update(
+                {
+                    "id": m.group(1).replace("//", "")
+                    if protocol != "trojan"
+                    else "",
+                    "address": m.group(2),
+                    "port": int(m.group(3)),
+                }
+            )
     elif protocol == "wireguard":
-        m = re.search(r'([^@]+)@([^:]+):(\d+)', main_config)
+        m = re.search(r"([^@]+)@([^:]+):(\d+)", main_config)
         if m:
-            common.update({
-                "wg_secret_key": m.group(1).split('wireguard://')[1],
-                "address": m.group(2),
-                "port": int(m.group(3)),
-            })
+            common.update(
+                {
+                    "wg_secret_key": m.group(1).split("wireguard://")[1],
+                    "address": m.group(2),
+                    "port": int(m.group(3)),
+                }
+            )
     elif protocol in ("hy2", "hysteria2"):
         m = re.search(rf"{protocol}://([^@]+)@([^:/?#]+):(\d+)", main_config)
         if m:
-            common.update({
-                "ss_password": m.group(1),
-                "address": m.group(2),
-                "port": int(m.group(3)),
-            })
+            common.update(
+                {
+                    "ss_password": m.group(1),
+                    "address": m.group(2),
+                    "port": int(m.group(3)),
+                }
+            )
     else:
-        m = re.search(r'@([^:]+):(\d+)', main_config)
+        m = re.search(r"@([^:]+):(\d+)", main_config)
         if m:
-            common.update({
-                "address": m.group(1),
-                "port": int(m.group(2)),
-            })
+            common.update(
+                {
+                    "address": m.group(1),
+                    "port": int(m.group(2)),
+                }
+            )
 
     if protocol == "vless":
         query = main_config.split("?", 1)[1] if "?" in main_config else ""
         p = _parse_query_params(query)
         host_params = {
-            "tcp": p.get("host"), "ws": p.get("host"), "h2": p.get("host"),
-            "httpupgrade": p.get("host"), "xhttp": p.get("host"),
-            "splithttp": p.get("host"), "quic": p.get("quicSecurity"),
+            "tcp": p.get("host"),
+            "ws": p.get("host"),
+            "h2": p.get("host"),
+            "httpupgrade": p.get("host"),
+            "xhttp": p.get("host"),
+            "splithttp": p.get("host"),
+            "quic": p.get("quicSecurity"),
             "grpc": p.get("authority"),
         }
         path_params = {
-            "ws": p.get("path"), "h2": p.get("path"), "httpupgrade": p.get("path"),
-            "splithttp": p.get("path"), "xhttp": p.get("path"),
-            "kcp": p.get("seed"), "grpc": p.get("serviceName"), "quic": p.get("key"),
+            "ws": p.get("path"),
+            "h2": p.get("path"),
+            "httpupgrade": p.get("path"),
+            "splithttp": p.get("path"),
+            "xhttp": p.get("path"),
+            "kcp": p.get("seed"),
+            "grpc": p.get("serviceName"),
+            "quic": p.get("key"),
         }
         typ = p.get("type", "tcp")
         return ConfigParams(
@@ -536,18 +663,27 @@ def parse_config_params(config: str) -> ConfigParams:
     if protocol == "trojan":
         query = main_config.split("?", 1)[1] if "?" in main_config else ""
         p = _parse_query_params(query)
-        m = re.search(r'trojan://([^@]+)@', main_config)
+        m = re.search(r"trojan://([^@]+)@", main_config)
         pwd = m.group(1) if m else ""
         host_params = {
-            "tcp": p.get("host"), "ws": p.get("host"), "h2": p.get("host"),
-            "httpupgrade": p.get("host"), "xhttp": p.get("host"),
-            "splithttp": p.get("host"), "quic": p.get("quicSecurity"),
+            "tcp": p.get("host"),
+            "ws": p.get("host"),
+            "h2": p.get("host"),
+            "httpupgrade": p.get("host"),
+            "xhttp": p.get("host"),
+            "splithttp": p.get("host"),
+            "quic": p.get("quicSecurity"),
             "grpc": p.get("authority"),
         }
         path_params = {
-            "ws": p.get("path"), "h2": p.get("path"), "httpupgrade": p.get("path"),
-            "splithttp": p.get("path"), "xhttp": p.get("path"),
-            "kcp": p.get("seed"), "grpc": p.get("serviceName"), "quic": p.get("key"),
+            "ws": p.get("path"),
+            "h2": p.get("path"),
+            "httpupgrade": p.get("path"),
+            "splithttp": p.get("path"),
+            "xhttp": p.get("path"),
+            "kcp": p.get("seed"),
+            "grpc": p.get("serviceName"),
+            "quic": p.get("key"),
         }
         typ = p.get("type", "tcp")
         return ConfigParams(
@@ -595,7 +731,9 @@ def parse_config_params(config: str) -> ConfigParams:
                     address, port = server.rsplit(":", 1)
                     port = int(port)
             else:
-                dec = base64.b64decode(main_part + "=" * (-len(main_part) % 4)).decode()
+                dec = base64.b64decode(
+                    main_part + "=" * (-len(main_part) % 4)
+                ).decode()
                 if "@" in dec:
                     auth, server = dec.split("@", 1)
                     if ":" in auth:
@@ -689,7 +827,11 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "port": SOCKS_PORT,
             "protocol": "socks",
             "listen": LOCAL_HOST,
-            "sniffing": {"enabled": SNIFFING, "destOverride": ["http", "tls"], "routeOnly": False},
+            "sniffing": {
+                "enabled": SNIFFING,
+                "destOverride": ["http", "tls"],
+                "routeOnly": False,
+            },
             "settings": {"auth": "noauth", "udp": True, "allowTransparent": False},
         },
         {
@@ -701,13 +843,15 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
         },
     ]
     if ENABLELOCALDNS:
-        inbounds.append({
-            "tag": "dns-in",
-            "listen": LOCAL_HOST,
-            "port": LOCALDNSPORT,
-            "protocol": "dokodemo-door",
-            "settings": {"address": "8.8.8.8", "network": "tcp,udp", "port": 53},
-        })
+        inbounds.append(
+            {
+                "tag": "dns-in",
+                "listen": LOCAL_HOST,
+                "port": LOCALDNSPORT,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "8.8.8.8", "network": "tcp,udp", "port": 53},
+            }
+        )
 
     # outbound
     stream = {"network": params.type or "tcp", "security": params.security or ""}
@@ -766,19 +910,27 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
         "fingerprint": params.fp or "",
     }
     if params.alpn:
-        tls_settings["alpn"] = [a.strip() for a in params.alpn.split(",") if a.strip()]
+        tls_settings["alpn"] = [
+            a.strip() for a in params.alpn.split(",") if a.strip()
+        ]
     if params.security == REALITY:
-        tls_settings.update({
-            "publicKey": params.pbk or "",
-            "shortId": params.sid or "",
-            "spiderX": params.spx or "",
-        })
+        tls_settings.update(
+            {
+                "publicKey": params.pbk or "",
+                "shortId": params.sid or "",
+                "spiderX": params.spx or "",
+            }
+        )
         stream["realitySettings"] = tls_settings
     elif params.security == TLS:
         stream["tlsSettings"] = tls_settings
 
     if FRAGMENT:
-        stream["sockopt"] = {"dialerProxy": "fragment", "tcpKeepAliveIdle": 100, "mark": 255}
+        stream["sockopt"] = {
+            "dialerProxy": "fragment",
+            "tcpKeepAliveIdle": 100,
+            "mark": 255,
+        }
 
     mux = {
         "enabled": MUX_ENABLE,
@@ -792,18 +944,22 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "tag": "proxy",
             "protocol": "vless",
             "settings": {
-                "vnext": [{
-                    "address": params.address,
-                    "port": params.port,
-                    "users": [{
-                        "id": params.id,
-                        "security": "auto",
-                        "level": 8,
-                        "encryption": params.encryption or "none",
-                        "flow": params.flow or "",
-                        "alterId": 0,
-                    }],
-                }],
+                "vnext": [
+                    {
+                        "address": params.address,
+                        "port": params.port,
+                        "users": [
+                            {
+                                "id": params.id,
+                                "security": "auto",
+                                "level": 8,
+                                "encryption": params.encryption or "none",
+                                "flow": params.flow or "",
+                                "alterId": 0,
+                            }
+                        ],
+                    }
+                ],
             },
             "mux": mux,
             "streamSettings": stream,
@@ -813,18 +969,22 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "tag": "proxy",
             "protocol": "vmess",
             "settings": {
-                "vnext": [{
-                    "address": params.address,
-                    "port": params.port,
-                    "users": [{
-                        "id": params.id,
-                        "security": params.scy or "auto",
-                        "level": 8,
-                        "encryption": "",
-                        "flow": "",
-                        "alterId": params.alter_id or 0,
-                    }],
-                }],
+                "vnext": [
+                    {
+                        "address": params.address,
+                        "port": params.port,
+                        "users": [
+                            {
+                                "id": params.id,
+                                "security": params.scy or "auto",
+                                "level": 8,
+                                "encryption": "",
+                                "flow": "",
+                                "alterId": params.alter_id or 0,
+                            }
+                        ],
+                    }
+                ],
             },
             "mux": mux,
             "streamSettings": stream,
@@ -834,32 +994,44 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "tag": "proxy",
             "protocol": "trojan",
             "settings": {
-                "servers": [{
-                    "address": params.address,
-                    "port": params.port,
-                    "method": "chacha20-poly1305",
-                    "ota": False,
-                    "level": 8,
-                    "password": params.ss_password,
-                }],
+                "servers": [
+                    {
+                        "address": params.address,
+                        "port": params.port,
+                        "method": "chacha20-poly1305",
+                        "ota": False,
+                        "level": 8,
+                        "password": params.ss_password,
+                    }
+                ],
             },
             "mux": mux,
             "streamSettings": stream,
         }
     elif params.protocol == "ss":
-        sockopt = {"dialerProxy": "fragment", "tcpKeepAliveIdle": 100, "mark": 255} if FRAGMENT else None
+        sockopt = (
+            {
+                "dialerProxy": "fragment",
+                "tcpKeepAliveIdle": 100,
+                "mark": 255,
+            }
+            if FRAGMENT
+            else None
+        )
         outbound = {
             "tag": "proxy",
             "protocol": "shadowsocks",
             "settings": {
-                "servers": [{
-                    "address": params.address,
-                    "method": params.ss_method,
-                    "port": params.port,
-                    "ota": False,
-                    "level": 8,
-                    "password": params.ss_password,
-                }],
+                "servers": [
+                    {
+                        "address": params.address,
+                        "method": params.ss_method,
+                        "port": params.port,
+                        "ota": False,
+                        "level": 8,
+                        "password": params.ss_password,
+                    }
+                ],
             },
             "mux": mux,
             "streamSettings": {
@@ -873,26 +1045,46 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "tag": "proxy",
             "protocol": "socks",
             "settings": {
-                "servers": [{
-                    "address": params.address,
-                    "port": params.port,
-                    "method": params.ss_method,
-                    "ota": False,
-                    "level": 8,
-                    "password": params.ss_password,
-                    **({"users": [{"level": 8, "pass": params.ss_password, "user": params.socks_user}]} if params.socks_user or params.ss_password else {}),
-                }],
+                "servers": [
+                    {
+                        "address": params.address,
+                        "port": params.port,
+                        "method": params.ss_method,
+                        "ota": False,
+                        "level": 8,
+                        "password": params.ss_password,
+                        **(
+                            {
+                                "users": [
+                                    {
+                                        "level": 8,
+                                        "pass": params.ss_password,
+                                        "user": params.socks_user,
+                                    }
+                                ]
+                            }
+                            if params.socks_user or params.ss_password
+                            else {}
+                        ),
+                    }
+                ],
             },
             "mux": mux,
             "streamSettings": {"network": "tcp", "security": ""},
         }
     elif params.protocol == "wireguard":
-        reserved = [int(x) for x in params.wg_reserved.split(",")] if params.wg_reserved else []
+        reserved = (
+            [int(x) for x in params.wg_reserved.split(",")]
+            if params.wg_reserved
+            else []
+        )
         outbound = {
             "tag": "proxy",
             "protocol": "wireguard",
             "settings": {
-                "address": params.wg_address.split(",") if params.wg_address else [],
+                "address": params.wg_address.split(",")
+                if params.wg_address
+                else [],
                 "mtu": params.wg_mtu,
                 "reserved": reserved,
                 "secretKey": params.wg_secret_key,
@@ -901,50 +1093,72 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
                 "wnoisedelay": params.wnoisedelay,
                 "wpayloadsize": params.wpayloadsize,
                 "keepAlive": params.wg_keep_alive,
-                "peers": [{
-                    "endpoint": f"{params.wg_endpoint}:{params.port}",
-                    "publicKey": params.wg_public_key,
-                }],
+                "peers": [
+                    {
+                        "endpoint": f"{params.wg_endpoint}:{params.port}",
+                        "publicKey": params.wg_public_key,
+                    }
+                ],
             },
         }
     else:
-        raise ValueError(f"Неподдерживаемый протокол для Xray: {params.protocol}")
+        raise ValueError(
+            f"Неподдерживаемый протокол для Xray: {params.protocol}"
+        )
 
     outbounds = [outbound]
     if FRAGMENT:
-        outbounds.append({
-            "tag": "fragment",
-            "protocol": "freedom",
-            "settings": {
-                "fragment": {
-                    "packets": PACKETS,
-                    "length": LENGTH,
-                    "interval": INTERVAL,
+        outbounds.append(
+            {
+                "tag": "fragment",
+                "protocol": "freedom",
+                "settings": {
+                    "fragment": {
+                        "packets": PACKETS,
+                        "length": LENGTH,
+                        "interval": INTERVAL,
+                    },
                 },
-            },
-            "streamSettings": {
-                "sockopt": {"TcpNoDelay": True, "tcpKeepAliveIdle": 100, "mark": 255},
-            },
-        })
+                "streamSettings": {
+                    "sockopt": {
+                        "TcpNoDelay": True,
+                        "tcpKeepAliveIdle": 100,
+                        "mark": 255,
+                    },
+                },
+            }
+        )
     outbounds.append({"tag": "direct", "protocol": "freedom", "settings": {}})
-    outbounds.append({"tag": "block", "protocol": "blackhole", "settings": {"response": {"type": "http"}}})
+    outbounds.append(
+        {
+            "tag": "block",
+            "protocol": "blackhole",
+            "settings": {"response": {"type": "http"}},
+        }
+    )
 
     # dns
     dns_servers = [REMOTEDNS]
     if ENABLELOCALDNS and not ENABLEFAKEDNS:
-        dns_servers.insert(0, {
-            "address": DOMESTICDNS,
-            "domains": ["geosite:cn"],
-            "expectIPs": ["geoip:cn"],
-            "port": 53,
-        })
+        dns_servers.insert(
+            0,
+            {
+                "address": DOMESTICDNS,
+                "domains": ["geosite:cn"],
+                "expectIPs": ["geoip:cn"],
+                "port": 53,
+            },
+        )
     elif ENABLELOCALDNS and ENABLEFAKEDNS:
-        dns_servers.insert(0, {
-            "address": DOMESTICDNS,
-            "domains": ["geosite:cn"],
-            "expectIPs": ["geoip:cn"],
-            "port": 53,
-        })
+        dns_servers.insert(
+            0,
+            {
+                "address": DOMESTICDNS,
+                "domains": ["geosite:cn"],
+                "expectIPs": ["geoip:cn"],
+                "port": 53,
+            },
+        )
         dns_servers.insert(1, {"address": "fakedns", "domains": ["geosite:cn"]})
 
     dns = {
@@ -959,7 +1173,11 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
 
     # routing
     rules = []
-    for key, tag in (("proxy", "proxy"), ("direct", "direct"), ("block", "block")):
+    for key, tag in (
+        ("proxy", "proxy"),
+        ("direct", "direct"),
+        ("block", "block"),
+    ):
         val = routing_sets.get(key, "")
         if not val:
             continue
@@ -973,9 +1191,23 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             else:
                 domains.append(item)
         if domains:
-            rules.append({"type": "field", "domain": domains, "outboundTag": tag, "enabled": True})
+            rules.append(
+                {
+                    "type": "field",
+                    "domain": domains,
+                    "outboundTag": tag,
+                    "enabled": True,
+                }
+            )
         if ips:
-            rules.append({"type": "field", "ip": ips, "outboundTag": tag, "enabled": True})
+            rules.append(
+                {
+                    "type": "field",
+                    "ip": ips,
+                    "outboundTag": tag,
+                    "enabled": True,
+                }
+            )
 
     routing = {"domainStrategy": DOMAINSTRATEGY, "rules": rules}
 
@@ -1040,22 +1272,24 @@ def build_hy2_yaml(params: ConfigParams, local_port: int) -> dict:
             "type": "salamander",
             "salamander": {"password": params.hy2_obfs_password},
         }
-    y.update({
-        "bandwidth": {"up": "20 mbps", "down": "100 mbps"},
-        "quic": {
-            "initStreamReceiveWindow": 8388608,
-            "maxStreamReceiveWindow": 8388608,
-            "initConnReceiveWindow": 20971520,
-            "maxConnReceiveWindow": 20971520,
-            "maxIdleTimeout": "30s",
-            "keepAlivePeriod": "10s",
-            "disablePathMTUDiscovery": False,
-        },
-        "fastOpen": True,
-        "lazy": True,
-        "socks5": {"listen": f"{LOCAL_HOST}:{SOCKS_PORT + 2}"},
-        "http": {"listen": f"{LOCAL_HOST}:{HTTP_PORT + 2}"},
-    })
+    y.update(
+        {
+            "bandwidth": {"up": "20 mbps", "down": "100 mbps"},
+            "quic": {
+                "initStreamReceiveWindow": 8388608,
+                "maxStreamReceiveWindow": 8388608,
+                "initConnReceiveWindow": 20971520,
+                "maxConnReceiveWindow": 20971520,
+                "maxIdleTimeout": "30s",
+                "keepAlivePeriod": "10s",
+                "disablePathMTUDiscovery": False,
+            },
+            "fastOpen": True,
+            "lazy": True,
+            "socks5": {"listen": f"{LOCAL_HOST}:{SOCKS_PORT + 2}"},
+            "http": {"listen": f"{LOCAL_HOST}:{HTTP_PORT + 2}"},
+        }
+    )
     return y
 
 
@@ -1065,20 +1299,26 @@ def _get_http_port() -> int:
     return cfg["core"]["inbound_ports"]["http"]
 
 
-def check_one_config(link: str, idx: int) -> Optional[str]:
+def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
     """
-    Проверяет один конфиг. Возвращает исходную ссылку, если она рабочая, иначе None.
+    Проверяет один конфиг с выводом детального прогресса в консоль.
+    Возвращает исходную ссылку, если она рабочая, иначе None.
     """
+    print(f"[{idx + 1}/{total}] 🔍 Проверяется узел: {link[:50]}...")
+
     if not CHECK_ENABLED or not TEST_URL:
+        print(f"[{idx + 1}/{total}] ⚠️ Проверка отключена или нет TEST_URL")
         return link
 
     try:
         params = parse_config_params(link)
         if not params.address or not params.port:
-            print(f"  [{idx}] Пропуск: не удалось извлечь address/port")
+            print(
+                f"[{idx + 1}/{total}] ❌ Пропуск: не удалось извлечь address/port"
+            )
             return None
 
-        local_port = idx + 2
+        local_port = (idx % 50) + 2
         xray_conf_path = XRAY_TMP_DIR / f"check_{idx}.json"
         hy2_yaml_path = HY2_TMP_DIR / f"check_{idx}.yaml"
 
@@ -1111,7 +1351,12 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
             "https": f"http://127.0.0.{local_port}:{_get_http_port()}",
         }
         try:
-            r = requests.get(TEST_URL, proxies=proxies, timeout=CHECK_TIMEOUT, headers={"Connection": "close"})
+            r = requests.get(
+                TEST_URL,
+                proxies=proxies,
+                timeout=CHECK_TIMEOUT,
+                headers={"Connection": "close"},
+            )
             ok = r.status_code in (200, 204)
         except Exception:
             ok = False
@@ -1126,10 +1371,15 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
             process_manager.stop_process(f"hysteria_{idx}")
         process_manager.stop_process(f"xray_{idx}")
 
-        return link if ok else None
+        if ok:
+            print(f"[{idx + 1}/{total}] ✅ Успешно рабочий узел")
+            return link
+        else:
+            print(f"[{idx + 1}/{total}] ❌ Недоступен / Ошибка соединения")
+            return None
 
     except Exception as e:
-        print(f"  [{idx}] Ошибка проверки: {e}")
+        print(f"[{idx + 1}/{total}] ❌ Ошибка проверки: {e}")
         try:
             process_manager.stop_process(f"xray_{idx}")
             process_manager.stop_process(f"hysteria_{idx}")
@@ -1139,15 +1389,21 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
 
 
 def check_configs(links: List[str]) -> List[str]:
-    """Проверяет список конфигов параллельно. Возвращает только рабочие."""
+    """Проверяет список конфигов параллельно с лимитом 10 потоков. Возвращает рабочие."""
     if not CHECK_ENABLED:
         print("[i] Проверка отключена (CHECK_ENABLED=False)")
         return links
 
-    print(f"[=] Проверка {len(links)} конфигов (воркеров: {TH_MAX_WORKER})...")
+    total = len(links)
+    print(
+        f"\n🚀 Запуск проверки {total} конфигураций в {TH_MAX_WORKER} потоков...\n"
+    )
     working = []
     with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
-        futures = {executor.submit(check_one_config, link, i): link for i, link in enumerate(links)}
+        futures = {
+            executor.submit(check_one_config, link, i, total): link
+            for i, link in enumerate(links)
+        }
         for fut in futures:
             try:
                 res = fut.result()
@@ -1156,18 +1412,21 @@ def check_configs(links: List[str]) -> List[str]:
                 res = None
             if res is not None:
                 working.append(res)
-    print(f"[=] Рабочих конфигов: {len(working)} из {len(links)}")
+    print(f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} из {total}")
     return working
+
 
 # ============================================================
 # Часть 3: Happ API
 # ============================================================
 
+
 def encrypt_happ_link(raw_url):
     api_url = "https://crypto.happ.su/api-v2.php"
     payload = json.dumps({"url": raw_url}).encode("utf-8")
     req = urllib.request.Request(
-        api_url, data=payload,
+        api_url,
+        data=payload,
         headers={"Content-Type": "application/json", "User-Agent": UA},
         method="POST",
     )
@@ -1176,7 +1435,9 @@ def encrypt_happ_link(raw_url):
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
                 encrypted_link = data.get("encrypted_link")
-                if encrypted_link and encrypted_link.startswith("happ://crypt5/"):
+                if encrypted_link and encrypted_link.startswith(
+                    "happ://crypt5/"
+                ):
                     print("[✓] Ссылка Happ успешно создана.")
                     return encrypted_link
                 else:
@@ -1189,9 +1450,11 @@ def encrypt_happ_link(raw_url):
         print(f"[!] Ошибка при запросе к API Happ: {e}")
         return None
 
+
 # ============================================================
 # main
 # ============================================================
+
 
 def main():
     force = FORCE_REBUILD or ("--force" in sys.argv)
@@ -1201,7 +1464,8 @@ def main():
         return 1
 
     urls = [
-        l.strip() for l in SOURCES.read_text(encoding="utf-8").splitlines()
+        l.strip()
+        for l in SOURCES.read_text(encoding="utf-8").splitlines()
         if l.strip() and not l.lstrip().startswith("#")
     ]
     if not urls:
@@ -1249,15 +1513,24 @@ def main():
         print("[i] Проверка отключена, используются все конфиги")
 
     if not all_links:
-        print("[!] После проверки не осталось рабочих конфигов. merged.txt не обновляется.")
+        print(
+            "[!] После проверки не осталось рабочих конфигов. merged.txt не обновляется."
+        )
         current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
         raw_url = "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt"
         encrypted = encrypt_happ_link(raw_url) or raw_url
-        OUT_HAPP.write_text(json.dumps({
-            "encrypted_link": encrypted,
-            "updated_at": current_time,
-            "config_count": 0,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        OUT_HAPP.write_text(
+            json.dumps(
+                {
+                    "encrypted_link": encrypted,
+                    "updated_at": current_time,
+                    "config_count": 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         return 0
 
     # Геолокация (только для рабочих)
@@ -1294,7 +1567,9 @@ def main():
 
     OUT_PLAIN.parent.mkdir(parents=True, exist_ok=True)
     OUT_PLAIN.write_text(text, encoding="utf-8")
-    OUT_B64.write_text(base64.b64encode(text.encode("utf-8")).decode(), encoding="utf-8")
+    OUT_B64.write_text(
+        base64.b64encode(text.encode("utf-8")).decode(), encoding="utf-8"
+    )
     print(f"[✓] {OUT_PLAIN} ({len(renamed)} шт.)")
     print(f"[✓] {OUT_B64}")
 
@@ -1311,7 +1586,9 @@ def main():
         "updated_at": current_time,
         "config_count": len(renamed),
     }
-    OUT_HAPP.write_text(json.dumps(happ_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUT_HAPP.write_text(
+        json.dumps(happ_data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[✓] {OUT_HAPP} (ссылка: {encrypted_link[:30]}...)")
 
     return 0
