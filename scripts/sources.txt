@@ -6,7 +6,6 @@ https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
 https://sub.vlessfo.ru/vlessforu/working_configs.txt
 https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/BLACK_LTE.txt
 https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/WHITE_LITE.txt
-https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/refs/heads/main/output/vless.txt
 https://raw.githubusercontent.com/Andrejewild/vless-free-keys-russia/refs/heads/main/sub.txt
 https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt
 https://github.com/Maskkost93/kizyak-vpn-4.0/raw/refs/heads/main/kizyakbeta6.txt
