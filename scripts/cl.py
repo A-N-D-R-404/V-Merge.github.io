@@ -1550,28 +1550,34 @@ def save_sorted_configs(configs: list):
 
     print("\nЗапрос к API Happ для создания ссылки на проверенные конфиги...")
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            final_content = f.read()
+        # API Happ принимает ссылку на файл, а не текст
+        raw_url = "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt"
         
-        # ЗАМЕНИТЕ URL, если в вашем merge.py используется другой!
-        response = requests.post(
-            "https://api.happ.agency/api/encrypt", 
-            json={"config": final_content},
-            timeout=15
+        payload = json.dumps({"url": raw_url}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://crypto.happ.su/api-v2.php",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; V-Merge-Bot/1.0)"
+            },
+            method="POST"
         )
         
-        if response.status_code == 200:
-            happ_link = response.json().get("link", "")
-            if happ_link:
-                with open("output/happ_link.txt", "w", encoding="utf-8") as f:
-                    f.write(happ_link)
-                print(f"[✓] Ссылка Happ успешно создана: {happ_link[:30]}...")
+        with urllib.request.urlopen(req, timeout=20) as response:
+            if response.status == 200:
+                response_data = json.loads(response.read().decode("utf-8"))
+                encrypted_link = response_data.get("encrypted_link")
+                if encrypted_link and encrypted_link.startswith("happ://crypt5/"):
+                    with open("output/happ_link.txt", "w", encoding="utf-8") as f:
+                        f.write(encrypted_link)
+                    print(f"[✓] Ссылка Happ успешно создана: {encrypted_link[:30]}...")
+                else:
+                    print(f"[!] API Happ вернул неожиданный ответ: {response_data}")
             else:
-                print("[!] API вернул пустую ссылку.")
-        else:
-            print(f"[!] Ошибка API Happ: HTTP {response.status_code}")
+                print(f"[!] Ошибка API Happ: HTTP {response.status}")
     except Exception as e:
-        print(f"[!] Не удалось создать ссылку Happ: {e}")
+        print(f"[!] Ошибка при запросе к API Happ: {e}")
 
 if __name__ == "__main__":
     LOCAL_MERGED = "output/merged.txt"
