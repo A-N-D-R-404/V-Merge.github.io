@@ -6,17 +6,12 @@ V-Merge: объединённый скрипт сбора, проверки и �
 Поток:
 1. Читает источники из scripts/sources.txt (динамически).
 2. Скачивает и дедуплицирует конфиги.
-3. Проверяет работоспособность каждого конфига через Xray/Hysteria.
-4. Определяет страну для рабочих конфигов (ip-api.com).
-5. Переименовывает с флагами и сохраняет в output/merged.txt.
-6. Обновляет output/happ_link.txt через API Happ.
+3. Отсеивает ранее известные нерабочие конфиги (dead_cache.json).
+4. Проверяет работоспособность каждого конфига через Xray/Hysteria (с ограничением 500 рабочих).
+5. Определяет страну для рабочих конфигов (ip-api.com).
+6. Переименовывает с флагами и сохраняет в output/merged.txt.
+7. Обновляет output/happ_link.txt через API Happ.
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import datetime
-from json import JSONEncoder
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 import base64
 import hashlib
 import ipaddress
@@ -33,12 +28,18 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime
+from json import JSONEncoder
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from requests import RequestException
-from retrying import retry
 import psutil
 import requests
 import yaml
+from requests import RequestException
+from retrying import retry
 
 # ============================================================
 # Пути
@@ -46,6 +47,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "scripts" / "sources.txt"
 GEO_CACHE = ROOT / "scripts" / "geo_cache.json"
+DEAD_CACHE = ROOT / "scripts" / "dead_cache.json"  # 🛑 Файл кэша нерабочих конфигов
 STATE_FILE = ROOT / "scripts" / "sources_state.json"
 CONF_PATH = ROOT / "scripts" / "config.json"  # config.json теперь в scripts/
 OUT_PLAIN = ROOT / "output" / "merged.txt"
@@ -70,8 +72,8 @@ RENAME_ENABLED = True
 FORCE_REBUILD = False
 
 CHECK_ENABLED = True
-TH_MAX_WORKER = 10  # 🚀 Увеличено с 5 до 10 одновременных проверок
-MAX_WORKING_LIMIT = 500  # 🎯 Лимит рабочих конфигов (при достижении проверка останавливается)
+TH_MAX_WORKER = 10  # 🚀 10 одновременных проверок
+MAX_WORKING_LIMIT = 500  # 🎯 Лимит рабочих конфигов
 CHECK_TIMEOUT = 10  # секунд на HTTP-запрос через прокси
 CHECK_LOC = True  # определять страну для рабочих конфигов
 
@@ -152,10 +154,39 @@ def flag(cc):
     code = cc.upper()
     if code in FLAGS:
         return FLAGS[code]
-    # Автогенерация из Unicode regional indicator symbols для остальных стран
     if len(code) == 2 and code.isalpha():
         return chr(ord(code[0]) + 127397) + chr(ord(code[1]) + 127397)
     return "🏴"
+
+
+# ============================================================
+# Управление кэшем нерабочих конфигов
+# ============================================================
+
+
+def get_config_hash(link: str) -> str:
+    """Генерирует чистый идентификатор конфига без тегов для кэша."""
+    base_link = link.split("#", 1)[0].strip()
+    return hashlib.md5(base_link.encode("utf-8")).hexdigest()
+
+
+def load_dead_cache() -> set:
+    if not DEAD_CACHE.exists():
+        return set()
+    try:
+        data = json.loads(DEAD_CACHE.read_text(encoding="utf-8"))
+        return set(data)
+    except Exception as e:
+        print(f"[!] Ошибка чтения dead_cache.json: {e}", file=sys.stderr)
+        return set()
+
+
+def save_dead_cache(dead_set: set):
+    DEAD_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    DEAD_CACHE.write_text(
+        json.dumps(sorted(list(dead_set)), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 # ============================================================
@@ -415,7 +446,6 @@ def update_geo_cache(hosts, geo):
 # Часть 2: проверка конфигов через Xray/Hysteria
 # ============================================================
 
-# Загружаем тестовый URL из config.json
 try:
     with open(CONF_PATH, "r") as f:
         _cfg = json.load(f)
@@ -465,8 +495,6 @@ class ProcessManager:
 
 
 process_manager = ProcessManager()
-
-# ---- Парсинг конфигов для Xray ----
 
 
 @dataclass
@@ -525,7 +553,6 @@ def _parse_query_params(query: str) -> Dict[str, str]:
 
 
 def parse_config_params(config: str) -> ConfigParams:
-    """Упрощённый парсер ссылки в ConfigParams (для проверки)."""
     config = urllib.parse.unquote(config.strip())
     main_config, _, tag = config.partition("#")
     tag = urllib.parse.unquote(tag)
@@ -786,7 +813,6 @@ def parse_config_params(config: str) -> ConfigParams:
 
 
 def build_xray_config(params: ConfigParams, local_port: int) -> str:
-    """Строит JSON-конфиг Xray для проверки одного прокси."""
     with open(CONF_PATH, "r") as f:
         cfg = json.load(f)
     core = cfg["core"]
@@ -814,13 +840,9 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
     ALLOWINCREASE = core["allow_insecure_tls"]
 
     LOCAL_HOST = f"127.0.0.{local_port}"
-    DEFAULT_PORT = 443
-    DEFAULT_LEVEL = 8
     TLS = "tls"
     REALITY = "reality"
-    HTTP = "http"
 
-    # inbounds
     inbounds = [
         {
             "tag": "socks",
@@ -853,7 +875,6 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             }
         )
 
-    # outbound
     stream = {"network": params.type or "tcp", "security": params.security or ""}
 
     if params.type == "tcp":
@@ -903,7 +924,6 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
             "multiMode": params.mode == "multi",
         }
 
-    # tls / reality
     tls_settings = {
         "allowInsecure": ALLOWINCREASE,
         "serverName": params.sni or "",
@@ -1137,7 +1157,6 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
         }
     )
 
-    # dns
     dns_servers = [REMOTEDNS]
     if ENABLELOCALDNS and not ENABLEFAKEDNS:
         dns_servers.insert(
@@ -1171,7 +1190,6 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
     if ENABLELOCALDNS and ENABLEFAKEDNS:
         dns["fakedns"] = {"ipPool": "198.18.0.0/15", "poolSize": 10000}
 
-    # routing
     rules = []
     for key, tag in (
         ("proxy", "proxy"),
@@ -1245,7 +1263,6 @@ def start_hy2(yaml_path: Path, idx: int):
 
 
 def build_hy2_yaml(params: ConfigParams, local_port: int) -> dict:
-    """Строит YAML-конфиг для Hysteria2."""
     with open(CONF_PATH, "r") as f:
         cfg = json.load(f)
     SOCKS_PORT = cfg["core"]["inbound_ports"]["socks"]
@@ -1300,10 +1317,6 @@ def _get_http_port() -> int:
 
 
 def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
-    """
-    Проверяет один конфиг с выводом детального прогресса в консоль.
-    Возвращает исходную ссылку, если она рабочая, иначе None.
-    """
     print(f"[{idx + 1}/{total}] 🔍 Проверяется узел: {link[:50]}...")
 
     if not CHECK_ENABLED or not TEST_URL:
@@ -1389,28 +1402,48 @@ def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
 
 
 def check_configs(links: List[str]) -> List[str]:
-    """Проверяет список конфигов с лимитом: останавливается, как наберет MAX_WORKING_LIMIT рабочих."""
+    """Проверяет список конфигов с авто-пропуском черного списка и лимитом в MAX_WORKING_LIMIT рабочих."""
     if not CHECK_ENABLED:
         print("[i] Проверка отключена (CHECK_ENABLED=False)")
         return links
 
-    total = len(links)
+    dead_cache = load_dead_cache()
+    filtered_links = []
+    skipped_count = 0
+
+    # 1. Фильтрация от заранее известных мертвых серверов
+    for link in links:
+        cfg_hash = get_config_hash(link)
+        if cfg_hash in dead_cache:
+            skipped_count += 1
+        else:
+            filtered_links.append(link)
+
     print(
-        f"\n🚀 Запуск проверки {total} конфигураций (цель: набрать {MAX_WORKING_LIMIT} рабочих) в {TH_MAX_WORKER} потоков...\n"
+        f"[=] Всего в базе: {len(links)} | Известных нерабочих (пропущено): {skipped_count} | К проверке: {len(filtered_links)}"
+    )
+
+    total = len(filtered_links)
+    if total == 0:
+        return []
+
+    print(
+        f"\n🚀 Запуск проверки {total} конфигураций (цель: {MAX_WORKING_LIMIT} рабочих) в {TH_MAX_WORKER} потоков...\n"
     )
 
     working = []
-    stop_event = threading.Event()  # Флаг для досрочной остановки потоков
+    stop_event = threading.Event()
 
     with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
         futures = {}
-        for i, link in enumerate(links):
+        for i, link in enumerate(filtered_links):
             if stop_event.is_set():
                 break
             fut = executor.submit(check_one_config, link, i, total)
             futures[fut] = link
 
         for fut in as_completed(futures):
+            link = futures[fut]
             if stop_event.is_set():
                 continue
             try:
@@ -1431,9 +1464,14 @@ def check_configs(links: List[str]) -> List[str]:
                     )
                     stop_event.set()
                     break
+            else:
+                # Вносим нерабочую ссылку в dead_cache
+                dead_cache.add(get_config_hash(link))
 
+    # Сохраняем обновившийся список нерабочих конфигураций
+    save_dead_cache(dead_cache)
     print(
-        f"\n🎉 Проверка завершена досрочно! Отобрано рабочих конфигов: {len(working)}"
+        f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Всего в черном списке: {len(dead_cache)}"
     )
     return working
 
@@ -1497,7 +1535,6 @@ def main():
     changed, new_state, cached = check_sources_changed(urls, force=force)
     save_state(new_state)
 
-    # Сбор ссылок
     all_links = []
     for url in urls:
         try:
