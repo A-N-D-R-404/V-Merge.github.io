@@ -72,7 +72,7 @@ FORCE_REBUILD = False
 CHECK_ENABLED = True
 TH_MAX_WORKER = 5
 CHECK_TIMEOUT = 10          # секунд на HTTP-запрос через прокси
-CHECK_LOC = True            # определять страну для рабочих конфигов (в merge это всегда так)
+CHECK_LOC = True            # определять страну для рабочих конфигов
 
 FLAGS = {
     "RU": "🇷🇺", "US": "🇺🇸", "DE": "🇩🇪", "NL": "🇳🇱", "FR": "🇫🇷",
@@ -509,9 +509,12 @@ def parse_config_params(config: str) -> ConfigParams:
         )
 
     if protocol == "vmess":
-        encoded = main_config.split("://")[1]
-        encoded += "=" * (-len(encoded) % 4)
-        vm = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        try:
+            encoded = main_config.split("://")[1]
+            encoded += "=" * (-len(encoded) % 4)
+            vm = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        except Exception:
+            raise ValueError("Битый vmess-конфиг")
         return ConfigParams(
             protocol="vmess",
             address=vm.get("add", ""),
@@ -601,13 +604,12 @@ def parse_config_params(config: str) -> ConfigParams:
                         address, port = server.rsplit(":", 1)
                         port = int(port)
         except Exception:
-            pass
+            raise ValueError("Битый ss-конфиг")
+        common.update({"address": address, "port": port})
         return ConfigParams(
             **common,
             ss_method=method,
             ss_password=password,
-            address=address,
-            port=port,
             security="none",
         )
 
