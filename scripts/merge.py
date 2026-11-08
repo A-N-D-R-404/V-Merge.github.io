@@ -49,7 +49,7 @@ SOURCES = ROOT / "scripts" / "sources.txt"
 GEO_CACHE = ROOT / "scripts" / "geo_cache.json"
 DEAD_CACHE = ROOT / "scripts" / "dead_cache.json"  # 🛑 Файл кэша нерабочих конфигов
 STATE_FILE = ROOT / "scripts" / "sources_state.json"
-CONF_PATH = ROOT / "scripts" / "config.json"  # config.json теперь в scripts/
+CONF_PATH = ROOT / "scripts" / "config.json"
 OUT_PLAIN = ROOT / "output" / "merged.txt"
 OUT_B64 = ROOT / "output" / "merged.base64.txt"
 OUT_HAPP = ROOT / "output" / "happ_link.txt"
@@ -182,11 +182,16 @@ def load_dead_cache() -> set:
 
 
 def save_dead_cache(dead_set: set):
-    DEAD_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    DEAD_CACHE.write_text(
-        json.dumps(sorted(list(dead_set)), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    """Гарантированно создает папку и сохраняет черный список."""
+    try:
+        DEAD_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        DEAD_CACHE.write_text(
+            json.dumps(sorted(list(dead_set)), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[✓] Черный список сохранен в {DEAD_CACHE.name} ({len(dead_set)} записей)")
+    except Exception as e:
+        print(f"[!] Ошибка сохранения {DEAD_CACHE.name}: {e}", file=sys.stderr)
 
 
 # ============================================================
@@ -1402,7 +1407,7 @@ def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
 
 
 def check_configs(links: List[str]) -> List[str]:
-    """Проверяет список конфигов с авто-пропуском черного списка и лимитом в MAX_WORKING_LIMIT рабочих."""
+    """Проверяет список конфигов с отсечением нерабочих и строгим прерыванием по лимиту 500."""
     if not CHECK_ENABLED:
         print("[i] Проверка отключена (CHECK_ENABLED=False)")
         return links
@@ -1411,7 +1416,7 @@ def check_configs(links: List[str]) -> List[str]:
     filtered_links = []
     skipped_count = 0
 
-    # 1. Фильтрация от заранее известных мертвых серверов
+    # 1. Отсеиваем ранее выявленные нерабочие узлы
     for link in links:
         cfg_hash = get_config_hash(link)
         if cfg_hash in dead_cache:
@@ -1420,7 +1425,7 @@ def check_configs(links: List[str]) -> List[str]:
             filtered_links.append(link)
 
     print(
-        f"[=] Всего в базе: {len(links)} | Известных нерабочих (пропущено): {skipped_count} | К проверке: {len(filtered_links)}"
+        f"[=] Всего строк: {len(links)} | В черном списке (пропущено): {skipped_count} | Осталось к проверке: {len(filtered_links)}"
     )
 
     total = len(filtered_links)
@@ -1460,18 +1465,19 @@ def check_configs(links: List[str]) -> List[str]:
 
                 if len(working) >= MAX_WORKING_LIMIT:
                     print(
-                        f"\n🛑 Достигнут лимит в {MAX_WORKING_LIMIT} рабочих конфигов. Останавливаем проверку!"
+                        f"\n🛑 Лимит в {MAX_WORKING_LIMIT} рабочих конфигов достигнут! Экстренно останавливаем проверку."
                     )
                     stop_event.set()
+                    for f in futures:
+                        f.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
                     break
             else:
-                # Вносим нерабочую ссылку в dead_cache
                 dead_cache.add(get_config_hash(link))
 
-    # Сохраняем обновившийся список нерабочих конфигураций
     save_dead_cache(dead_cache)
     print(
-        f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Всего в черном списке: {len(dead_cache)}"
+        f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Записей в черном списке: {len(dead_cache)}"
     )
     return working
 
