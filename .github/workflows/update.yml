@@ -1,25 +1,20 @@
-name: Update merged configs
+name: Merge and Check
 
 on:
-  schedule:
-    - cron: '0 */2 * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/**"
-      - ".github/workflows/update.yml"
+  schedule:
+    - cron: '0 */4 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
-concurrency:
-  group: update-merged
-  cancel-in-progress: true
-
 jobs:
-  update:
-    runs-on: ubuntu-24.04
+  build-and-check:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,37 +22,45 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.13'
 
-      - name: Set timezone to Moscow
-        run: sudo timedatectl set-timezone Europe/Moscow
+      - name: Install dependencies
+        run: |
+          pip install requests psutil retrying PyYaml
 
+      - name: Set execute permissions for binaries
+        run: |
+          chmod +x xray/xray
+          chmod +x hy2/hysteria
+
+      # ШАГ 1: Сборка (merge.py)
       - name: Run merge script
         run: python scripts/merge.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: Commit & push
+      # ШАГ 2: Проверка (cl.py)
+      - name: Run checker script
+        run: python scripts/cl.py
+
+      # ШАГ 3: Сохранение (с защитой от конфликтов)
+      - name: Commit and Push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add output/merged.txt \
-                  output/merged.base64.txt \
-                  output/happ_link.txt \
-                  scripts/geo_cache.json \
-                  scripts/sources_state.json
-
-          # Так как время в merged.txt меняется при каждом запуске, 
-          # коммит будет создаваться всегда. Убираем проверку --quiet.
-          git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
-          git push
-
-      - name: Trigger Bot Broadcast
-        run: |
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/A-N-D-R-404/V-Merge-Bot/dispatches \
-            -d '{"event_type": "configs_updated"}'
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add output/
+          
+          if ! git diff --staged --quiet; then
+            echo "Changes detected. Committing..."
+            git commit -m "chore: Auto-merge and check results [skip ci]"
+            
+            echo "Pulling remote changes to avoid conflict..."
+            git pull --rebase origin main
+            
+            echo "Pushing..."
+            git push origin main
+          else
+            echo "No changes to commit."
+          fi
