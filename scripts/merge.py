@@ -11,7 +11,7 @@ V-Merge: объединённый скрипт сбора, проверки и �
 5. Переименовывает с флагами и сохраняет в output/merged.txt.
 6. Обновляет output/happ_link.txt через API Happ.
 """
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from json import JSONEncoder
@@ -71,6 +71,7 @@ FORCE_REBUILD = False
 
 CHECK_ENABLED = True
 TH_MAX_WORKER = 10  # 🚀 Увеличено с 5 до 10 одновременных проверок
+MAX_WORKING_LIMIT = 500  # 🎯 Лимит рабочих конфигов (при достижении проверка останавливается)
 CHECK_TIMEOUT = 10  # секунд на HTTP-запрос через прокси
 CHECK_LOC = True  # определять страну для рабочих конфигов
 
@@ -138,7 +139,6 @@ FLAGS = {
     "UZ": "🇺🇿",
     "KG": "🇰🇬",
     "TW": "🇹🇼",
-    "GE": "🇬🇪",
     "CY": "🇨🇾",
     "LU": "🇱🇺",
     "MT": "🇲🇹",
@@ -1389,30 +1389,52 @@ def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
 
 
 def check_configs(links: List[str]) -> List[str]:
-    """Проверяет список конфигов параллельно с лимитом 10 потоков. Возвращает рабочие."""
+    """Проверяет список конфигов с лимитом: останавливается, как наберет MAX_WORKING_LIMIT рабочих."""
     if not CHECK_ENABLED:
         print("[i] Проверка отключена (CHECK_ENABLED=False)")
         return links
 
     total = len(links)
     print(
-        f"\n🚀 Запуск проверки {total} конфигураций в {TH_MAX_WORKER} потоков...\n"
+        f"\n🚀 Запуск проверки {total} конфигураций (цель: набрать {MAX_WORKING_LIMIT} рабочих) в {TH_MAX_WORKER} потоков...\n"
     )
+
     working = []
+    stop_event = threading.Event()  # Флаг для досрочной остановки потоков
+
     with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
-        futures = {
-            executor.submit(check_one_config, link, i, total): link
-            for i, link in enumerate(links)
-        }
-        for fut in futures:
+        futures = {}
+        for i, link in enumerate(links):
+            if stop_event.is_set():
+                break
+            fut = executor.submit(check_one_config, link, i, total)
+            futures[fut] = link
+
+        for fut in as_completed(futures):
+            if stop_event.is_set():
+                continue
             try:
                 res = fut.result()
             except Exception as e:
                 print(f"[!] Ошибка future: {e}")
                 res = None
+
             if res is not None:
                 working.append(res)
-    print(f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} из {total}")
+                print(
+                    f"🎯 Набрано рабочих конфигов: {len(working)}/{MAX_WORKING_LIMIT}"
+                )
+
+                if len(working) >= MAX_WORKING_LIMIT:
+                    print(
+                        f"\n🛑 Достигнут лимит в {MAX_WORKING_LIMIT} рабочих конфигов. Останавливаем проверку!"
+                    )
+                    stop_event.set()
+                    break
+
+    print(
+        f"\n🎉 Проверка завершена досрочно! Отобрано рабочих конфигов: {len(working)}"
+    )
     return working
 
 
