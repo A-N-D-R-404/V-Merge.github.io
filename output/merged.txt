@@ -1,5 +1,5 @@
 #profile-title: V-Merge 🚀
-#announce: Обновлено: 08.11.2026 05:05 | Конфигов: 789 | Автообновление
+#announce: Обновлено: 08.11.2026 05:11 | Конфигов: 789 | Автообновление
 #profile-web-page-url: https://a-n-d-r-404.github.io/V-Merge.github.io/
 #support-url: https://t.me/V_Merge_VPN
 #profile-update-interval: 1
