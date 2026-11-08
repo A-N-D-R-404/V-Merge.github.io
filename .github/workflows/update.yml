@@ -29,6 +29,16 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Make binaries executable
+        run: |
+          chmod +x xray/xray || true
+          chmod +x hy2/hysteria || true
+
       - name: Set timezone to Moscow
         run: sudo timedatectl set-timezone Europe/Moscow
 
@@ -49,8 +59,6 @@ jobs:
                   scripts/geo_cache.json \
                   scripts/sources_state.json
 
-          # Так как время в merged.txt меняется при каждом запуске, 
-          # коммит будет создаваться всегда. Убираем проверку --quiet.
           git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
           git push
 
