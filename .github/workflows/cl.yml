@@ -1,4 +1,4 @@
-name: Sub Checker Creator
+name: Merge and Check
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-commit:
+  build-and-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -22,40 +22,41 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-
           python-version: '3.13'
 
-      - name: Install Python dependencies
-        run: pip install requests psutil retrying PyYaml
-
-      - name: Clean up old results before run
+      - name: Install dependencies
         run: |
-          rm -f final.txt final_b64.txt vless*.txt vmess*.txt trojan*.txt ss*.txt hy2*.txt wireguard*.txt socks*.txt tuic*.txt ssr*.txt
-          rm -rf loc/
+          pip install requests psutil retrying PyYaml
 
+      # Если бинарники лежат в корне (xray/xray), этот шаг сработает
       - name: Set execute permissions for binaries
         run: |
           chmod +x xray/xray
           chmod +x hy2/hysteria
 
-      - name: Run the checker script
-        run: python cl.py
+      # ШАГ 1: Запуск сборщика (работает из папки scripts)
+      - name: Run merge script
+        run: python scripts/merge.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: Commit and Push new results
+      # ШАГ 2: Запуск проверки (путь указывает на папку scripts)
+      - name: Run checker script
+        run: python scripts/cl.py
+
+      # ШАГ 3: Сохранение результатов
+      - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # راه حل نهایی: همه تغییرات را اضافه کن...
-          git add .
-          # ... سپس پوشه گردش کار را از لیست تغییرات حذف کن تا خطای دسترسی رخ ندهد
-          git reset -- .github/
+          git add output/
           
           if ! git diff --staged --quiet; then
             echo "Changes detected. Committing and pushing..."
-            git commit -m "chore: Update subscription results [skip ci]"
-            # با استفاده از --force، نتایج جدید همیشه بازنویسی می‌شوند و از تداخل جلوگیری می‌شود
+            git commit -m "chore: Auto-merge and check results [skip ci]"
             git push --force
           else
-            echo "No changes detected to commit."
+            echo "No changes to commit."
           fi
