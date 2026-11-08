@@ -2,6 +2,14 @@
 """
 V-Merge: объединённый скрипт сбора, проверки и публикации VPN-конфигов.
 Заменяет merge.py + cl.py. Не создаёт новых файлов в репозитории.
+
+Поток:
+1. Читает источники из scripts/sources.txt (динамически).
+2. Скачивает и дедуплицирует конфиги.
+3. Проверяет работоспособность каждого конфига через Xray/Hysteria.
+4. Определяет страну для рабочих конфигов (ip-api.com).
+5. Переименовывает с флагами и сохраняет в output/merged.txt.
+6. Обновляет output/happ_link.txt через API Happ.
 """
 import base64
 import hashlib
@@ -32,36 +40,39 @@ import yaml
 from retrying import retry
 from requests import RequestException
 
+# ============================================================
+# Пути
+# ============================================================
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "scripts" / "sources.txt"
 GEO_CACHE = ROOT / "scripts" / "geo_cache.json"
 STATE_FILE = ROOT / "scripts" / "sources_state.json"
+CONF_PATH = ROOT / "scripts" / "config.json"          # config.json теперь в scripts/
 OUT_PLAIN = ROOT / "output" / "merged.txt"
 OUT_B64 = ROOT / "output" / "merged.base64.txt"
 OUT_HAPP = ROOT / "output" / "happ_link.txt"
 
-# Файлы, которые использует чекер (должны существовать в репо)
-CONF_PATH = ROOT / "config.json"
+# Бинарники и временные файлы — в корне
 XRAY_BIN = ROOT / "xray" / "xray"
 HY2_BIN = ROOT / "hy2" / "hysteria"
-TEMP_NORMAL = ROOT / "normal.tmp.txt"          # временный, удаляется после
-TEMP_FINAL = ROOT / "final.tmp.txt"            # временный, удаляется после
-XRAY_TMP_DIR = ROOT / "xray"                   # сюда пишем временные конфиги
-HY2_TMP_DIR = ROOT / "hy2"                     # сюда пишем временные yaml
+XRAY_TMP_DIR = ROOT / "xray"
+HY2_TMP_DIR = ROOT / "hy2"
 
 UA = "Mozilla/5.0 (compatible; V-Merge-Bot/1.0)"
 
+# ============================================================
+# Настройки
+# ============================================================
 GEO_ENABLED = True
 MAX_NEW = 200
 DELAY_BETWEEN = 1.5
 RENAME_ENABLED = True
 FORCE_REBUILD = False
 
-# Параметры чекера
 CHECK_ENABLED = True
 TH_MAX_WORKER = 5
 CHECK_TIMEOUT = 10          # секунд на HTTP-запрос через прокси
-CHECK_LOC = True            # определять страну для рабочих конфигов
+CHECK_LOC = True            # определять страну для рабочих конфигов (в merge это всегда так)
 
 FLAGS = {
     "RU": "🇷🇺", "US": "🇺🇸", "DE": "🇩🇪", "NL": "🇳🇱", "FR": "🇫🇷",
@@ -82,7 +93,7 @@ def flag(cc):
     return FLAGS.get(cc, "🏴")
 
 # ============================================================
-# Часть 1: сбор источников (из старого merge.py)
+# Часть 1: сбор источников
 # ============================================================
 
 def fetch(url, timeout=30):
@@ -311,7 +322,7 @@ def update_geo_cache(hosts, geo):
     return geo
 
 # ============================================================
-# Часть 2: проверка конфигов (адаптация cl.py)
+# Часть 2: проверка конфигов через Xray/Hysteria
 # ============================================================
 
 # Загружаем тестовый URL из config.json
@@ -360,7 +371,7 @@ class ProcessManager:
 
 process_manager = ProcessManager()
 
-# ---- Парсинг конфигов для Xray (минимально необходимая часть из cl.py) ----
+# ---- Парсинг конфигов для Xray ----
 
 @dataclass
 class ConfigParams:
@@ -433,7 +444,6 @@ def parse_config_params(config: str) -> ConfigParams:
 
     common = {"protocol": protocol, "tag": tag}
 
-    # Извлекаем address/port по-разному для разных протоколов
     if protocol in ("vless", "trojan"):
         m = re.search(r'([^:]+)@([^:]+):(\d+)', main_config)
         if m:
@@ -466,7 +476,6 @@ def parse_config_params(config: str) -> ConfigParams:
                 "port": int(m.group(2)),
             })
 
-    # Дальше — по протоколу
     if protocol == "vless":
         query = main_config.split("?", 1)[1] if "?" in main_config else ""
         p = _parse_query_params(query)
@@ -570,7 +579,6 @@ def parse_config_params(config: str) -> ConfigParams:
         )
 
     if protocol == "ss":
-        # упрощённый парсинг ss
         main_part = main_config.split("ss://", 1)[1].split("#", 1)[0]
         method, password = "chacha20-poly1305", ""
         address, port = common.get("address", ""), common.get("port", 0)
@@ -637,13 +645,8 @@ def parse_config_params(config: str) -> ConfigParams:
     raise ValueError(f"Неподдерживаемый протокол: {protocol}")
 
 
-def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Optional[str] = None) -> str:
-    """
-    Строит JSON-конфиг Xray для проверки одного прокси.
-    Использует настройки из config.json (fragment, mux, dns, routing).
-    Упрощённая версия по сравнению с cl.py, но достаточная для теста.
-    """
-    # Загружаем настройки
+def build_xray_config(params: ConfigParams, local_port: int) -> str:
+    """Строит JSON-конфиг Xray для проверки одного прокси."""
     with open(CONF_PATH, "r") as f:
         cfg = json.load(f)
     core = cfg["core"]
@@ -677,7 +680,7 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
     REALITY = "reality"
     HTTP = "http"
 
-    # ----- inbounds -----
+    # inbounds
     inbounds = [
         {
             "tag": "socks",
@@ -704,10 +707,9 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
             "settings": {"address": "8.8.8.8", "network": "tcp,udp", "port": 53},
         })
 
-    # ----- outbound (прокси) -----
+    # outbound
     stream = {"network": params.type or "tcp", "security": params.security or ""}
 
-    # transport settings
     if params.type == "tcp":
         header = {"type": params.header_type or "none"}
         if params.header_type == "http" and params.host:
@@ -773,11 +775,9 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
     elif params.security == TLS:
         stream["tlsSettings"] = tls_settings
 
-    # fragment
     if FRAGMENT:
         stream["sockopt"] = {"dialerProxy": "fragment", "tcpKeepAliveIdle": 100, "mark": 255}
 
-    # mux
     mux = {
         "enabled": MUX_ENABLE,
         "concurrency": CONCURRENCY,
@@ -785,7 +785,6 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
         "xudpProxyUDP443": "",
     }
 
-    # Сам outbound
     if params.protocol == "vless":
         outbound = {
             "tag": "proxy",
@@ -868,7 +867,6 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
             },
         }
     elif params.protocol == "socks":
-        # для hy2 проверка идёт через локальный socks, который поднимает hysteria
         outbound = {
             "tag": "proxy",
             "protocol": "socks",
@@ -929,7 +927,7 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
     outbounds.append({"tag": "direct", "protocol": "freedom", "settings": {}})
     outbounds.append({"tag": "block", "protocol": "blackhole", "settings": {"response": {"type": "http"}}})
 
-    # ----- dns -----
+    # dns
     dns_servers = [REMOTEDNS]
     if ENABLELOCALDNS and not ENABLEFAKEDNS:
         dns_servers.insert(0, {
@@ -957,7 +955,7 @@ def build_xray_config(params: ConfigParams, local_port: int, hy2_yaml_path: Opti
     if ENABLELOCALDNS and ENABLEFAKEDNS:
         dns["fakedns"] = {"ipPool": "198.18.0.0/15", "poolSize": 10000}
 
-    # ----- routing -----
+    # routing
     rules = []
     for key, tag in (("proxy", "proxy"), ("direct", "direct"), ("block", "block")):
         val = routing_sets.get(key, "")
@@ -1059,12 +1057,18 @@ def build_hy2_yaml(params: ConfigParams, local_port: int) -> dict:
     return y
 
 
+def _get_http_port() -> int:
+    with open(CONF_PATH, "r") as f:
+        cfg = json.load(f)
+    return cfg["core"]["inbound_ports"]["http"]
+
+
 def check_one_config(link: str, idx: int) -> Optional[str]:
     """
     Проверяет один конфиг. Возвращает исходную ссылку, если она рабочая, иначе None.
     """
     if not CHECK_ENABLED or not TEST_URL:
-        return link  # проверка отключена — считаем рабочим
+        return link
 
     try:
         params = parse_config_params(link)
@@ -1072,25 +1076,22 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
             print(f"  [{idx}] Пропуск: не удалось извлечь address/port")
             return None
 
-        local_port = idx + 2  # 127.0.0.{idx+2}
+        local_port = idx + 2
         xray_conf_path = XRAY_TMP_DIR / f"check_{idx}.json"
         hy2_yaml_path = HY2_TMP_DIR / f"check_{idx}.yaml"
 
-        # Hysteria2: сначала поднимаем hysteria, потом Xray с socks-outbound на него
         if params.protocol in ("hy2", "hysteria2"):
             hy2_yaml = build_hy2_yaml(params, local_port)
             with open(hy2_yaml_path, "w") as f:
                 yaml.dump(hy2_yaml, f)
             start_hy2(hy2_yaml_path, idx)
-            # Xray-конфиг для проверки socks-прокси, который подняла hysteria
             socks_params = ConfigParams(
                 protocol="socks",
                 address=f"127.0.0.{local_port}",
-                port=0,  # перезапишем ниже
+                port=0,
                 socks_user="",
                 ss_password="",
             )
-            # Порт socks из hy2 yaml
             socks_port = hy2_yaml["socks5"]["listen"].split(":")[-1]
             socks_params.port = int(socks_port)
             xray_conf = build_xray_config(socks_params, local_port)
@@ -1101,10 +1102,8 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
             f.write(xray_conf)
         start_xray(xray_conf_path, idx)
 
-        # Ждём запуска
         time.sleep(2.5)
 
-        # Тестовый HTTP-запрос через локальный прокси
         proxies = {
             "http": f"http://127.0.0.{local_port}:{_get_http_port()}",
             "https": f"http://127.0.0.{local_port}:{_get_http_port()}",
@@ -1115,14 +1114,12 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
         except Exception:
             ok = False
 
-        # Чистим временные файлы
         for p in (xray_conf_path, hy2_yaml_path):
             try:
                 p.unlink()
             except Exception:
                 pass
 
-        # Останавливаем процессы
         if params.protocol in ("hy2", "hysteria2"):
             process_manager.stop_process(f"hysteria_{idx}")
         process_manager.stop_process(f"xray_{idx}")
@@ -1137,12 +1134,6 @@ def check_one_config(link: str, idx: int) -> Optional[str]:
         except Exception:
             pass
         return None
-
-
-def _get_http_port() -> int:
-    with open(CONF_PATH, "r") as f:
-        cfg = json.load(f)
-    return cfg["core"]["inbound_ports"]["http"]
 
 
 def check_configs(links: List[str]) -> List[str]:
@@ -1167,7 +1158,7 @@ def check_configs(links: List[str]) -> List[str]:
     return working
 
 # ============================================================
-# Часть 3: Happ API (из старого merge.py)
+# Часть 3: Happ API
 # ============================================================
 
 def encrypt_happ_link(raw_url):
@@ -1207,7 +1198,6 @@ def main():
         print(f"[!] Нет {SOURCES}", file=sys.stderr)
         return 1
 
-    # Динамически читаем источники
     urls = [
         l.strip() for l in SOURCES.read_text(encoding="utf-8").splitlines()
         if l.strip() and not l.lstrip().startswith("#")
@@ -1250,7 +1240,7 @@ def main():
     all_links = unique_links
     print(f"[=] После дедупликации: {len(all_links)}")
 
-    # >>> ПРОВЕРКА РАБОТОСПОСОБНОСТИ <<<
+    # Проверка работоспособности
     if CHECK_ENABLED:
         all_links = check_configs(all_links)
     else:
@@ -1258,7 +1248,6 @@ def main():
 
     if not all_links:
         print("[!] После проверки не осталось рабочих конфигов. merged.txt не обновляется.")
-        # всё равно обновим happ_link, указав на текущий merged.txt
         current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
         raw_url = "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt"
         encrypted = encrypt_happ_link(raw_url) or raw_url
