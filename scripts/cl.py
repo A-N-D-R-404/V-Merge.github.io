@@ -36,7 +36,6 @@ with open(CONF_PATH, "r") as file_client_set:
     f = json.load(file_client_set)
     test_link_ = f["core"]["test_url"]
 
-# Убрали TEXT_PATH, так как нормал больше не нужен
 FIN_PATH = "merged.txt"
 FILE_HEADER_TEXT = """//profile-title: base64:2YfZhduM2LTZhyDZgdi52KfZhCDwn5iO8J+YjvCfmI4gaGFtZWRwNzE=
 //profile-update-interval: 1
@@ -1336,14 +1335,353 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
     return data_conf
 
 # ==============================================================================
-# ЗАПУСК
+# ОСТАЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
-if __name__ == "__main__":
-    # Читаем локальный файл, который создал merge.py
-    LOCAL_MERGED = "output/merged.txt"
+def is_ip_accessible_from_iran_via_check_host(ip_to_check_on_checkhost: str, proxies_to_use: Optional[dict], timeout_seconds: int = 20) -> Optional[bool]:
+    if not ip_to_check_on_checkhost: return True
+    proxy_display = proxies_to_use.get('http', 'None') if proxies_to_use else 'None'
+    print(f"CHECK-HOST (via proxy {proxy_display}): Checking Iran PING for target IP {ip_to_check_on_checkhost}")
+    check_host_api_url_base = "https://check-host.net/check-ping"
+    headers = {"Accept": "application/json", "User-Agent": "MyConfigTester/1.2"}
+    accessible_from_at_least_one_node = False
+    any_node_test_completed_without_service_error = False
+    for node_idx, node in enumerate(CHECK_HOST_IRANIAN_NODES):
+        if accessible_from_at_least_one_node: break
+        try:
+            init_url = f"{check_host_api_url_base}?host={ip_to_check_on_checkhost}&node={node}&max_nodes=1"
+            response_init = requests.get(init_url, headers=headers, timeout=10, proxies=proxies_to_use)
+            if response_init.status_code == 429: return None
+            response_init.raise_for_status()
+            init_data = response_init.json()
+            if init_data.get("ok") != 1:
+                error_msg = init_data.get('error', 'Unknown error during PING check initiation')
+                if "limit for your ip" in error_msg.lower() or "many requests" in error_msg.lower(): return None
+                any_node_test_completed_without_service_error = True
+                continue
+            request_id = init_data.get("request_id")
+            if not request_id:
+                any_node_test_completed_without_service_error = True
+                continue
+            result_url = f"https://check-host.net/check-result/{request_id}"
+            polling_deadline = time.time() + (timeout_seconds - 10)
+            node_ping_to_target_successful = False
+            while time.time() < polling_deadline:
+                time.sleep(3)
+                try:
+                    response_result = requests.get(result_url, headers=headers, timeout=5, proxies=proxies_to_use)
+                    if response_result.status_code == 429: return None
+                    response_result.raise_for_status()
+                    result_data_for_all_nodes_in_req = response_result.json()
+                    if not result_data_for_all_nodes_in_req: continue
+                    node_specific_result_list = result_data_for_all_nodes_in_req.get(node)
+                    if node_specific_result_list:
+                        any_node_test_completed_without_service_error = True
+                        if isinstance(node_specific_result_list, list) and len(node_specific_result_list) > 0:
+                            first_attempt_group = node_specific_result_list[0]
+                            if first_attempt_group and isinstance(first_attempt_group, list) and len(first_attempt_group) > 0:
+                                ping_stats = first_attempt_group[0]
+                                if ping_stats and isinstance(ping_stats, list) and len(ping_stats) >= 4:
+                                    avg_rtt_val_str = ping_stats[3]
+                                    if avg_rtt_val_str is not None and "ms" in avg_rtt_val_str:
+                                        print(f"  CH_PROXY: Target IP {ip_to_check_on_checkhost} ACCESSIBLE from Iran via {node} (RTT: {avg_rtt_val_str}).")
+                                        accessible_from_at_least_one_node = True
+                                        node_ping_to_target_successful = True
+                                        break
+                                    else: break
+                                else: break
+                            else: break
+                        break
+                except Exception:
+                    return None
+            if node_ping_to_target_successful: break
+        except Exception:
+            if node_idx == 0: return None
+    if accessible_from_at_least_one_node: return False
+    if any_node_test_completed_without_service_error: return True
+    return None
+
+def get_public_ipv4(t, port) -> Optional[str]:
+    urls = ["http://v4.ipv6-test.com/api/myip.php", "https://api.ipify.org", "https://icanhazip.com"]
+    proxy_host = f"127.0.0.{t}"
+    proxies = {"http": f"http://{proxy_host}:{port}", "https": f"http://{proxy_host}:{port}"}
+    headers = {"Connection": "close", "User-Agent": "Mozilla/5.0"}
+    def try_url(url):
+        try:
+            r = requests.get(url, timeout=IP_FETCH_TIMEOUT, proxies=proxies, headers=headers)
+            r.raise_for_status()
+            ip = r.text.strip()
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip): return ip
+        except Exception: pass
+        return None
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(try_url, u) for u in urls]
+        for fut in as_completed(futures):
+            ip = fut.result()
+            if ip: return ip
+    return None
+
+def should_retry_ip_api(exception):
+    if isinstance(exception, (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout)): return True
+    if isinstance(exception, requests.exceptions.HTTPError) and exception.response.status_code >= 500: return True
+    return False
+
+def fetch_exit_country_code_via_proxy(proxies_to_use: Optional[dict]) -> str:
+    try:
+        api_url_ipinfo = "https://ipinfo.io/json"
+        response_ipinfo = requests.get(api_url_ipinfo, timeout=COUNTRY_FETCH_TIMEOUT, proxies=proxies_to_use)
+        response_ipinfo.raise_for_status()
+        data_ipinfo = response_ipinfo.json()
+        country_code = data_ipinfo.get('country')
+        if country_code and isinstance(country_code, str) and len(country_code) == 2 and country_code.isalpha(): return country_code.upper()
+    except Exception: pass
+    try:
+        if not IPDATA_API_KEY or IPDATA_API_KEY == "YOUR_IPDATA_API_KEY": raise ValueError("IPDATA_API_KEY not set")
+        api_url_ipdata = f"https://api.ipdata.co?api-key={IPDATA_API_KEY}"
+        response_ipdata = requests.get(api_url_ipdata, timeout=COUNTRY_FETCH_TIMEOUT, proxies=proxies_to_use)
+        data_ipdata = response_ipdata.json()
+        country_code = data_ipdata.get('country_code')
+        if country_code and isinstance(country_code, str) and len(country_code) == 2 and country_code.isalpha(): return country_code.upper()
+    except Exception: pass
+    return "XX"
+
+@retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000, retry_on_exception=should_retry_ip_api)
+def fetch_country_code_with_fallback(ip_address: str) -> str:
+    if not ip_address: return "XX"
+    try:
+        if not IPDATA_API_KEY or IPDATA_API_KEY == "YOUR_IPDATA_API_KEY": raise ValueError("IPDATA_API_KEY not set")
+        api_url_ipdata = f"https://api.ipdata.co/{ip_address}?api-key={IPDATA_API_KEY}"
+        response_ipdata = requests.get(api_url_ipdata, timeout=COUNTRY_FETCH_TIMEOUT)
+        data_ipdata = response_ipdata.json()
+        if response_ipdata.status_code == 200 and "message" not in data_ipdata:
+            fetched_code_ipdata = data_ipdata.get('country_code')
+            if fetched_code_ipdata and isinstance(fetched_code_ipdata, str) and len(fetched_code_ipdata) == 2 and fetched_code_ipdata.isalpha(): return fetched_code_ipdata.upper()
+    except Exception: pass
+    try:
+        api_url_ipinfo = f"https://ipinfo.io/{ip_address}/json"
+        response_ipinfo = requests.get(api_url_ipinfo, timeout=COUNTRY_FETCH_TIMEOUT)
+        response_ipinfo.raise_for_status()
+        data_ipinfo = response_ipinfo.json()
+        fetched_code_ipinfo = data_ipinfo.get('country')
+        if fetched_code_ipinfo and isinstance(fetched_code_ipinfo, str) and len(fetched_code_ipinfo) == 2 and fetched_code_ipinfo.isalpha(): return fetched_code_ipinfo.upper()
+    except Exception: pass
+    return "XX"
+
+def get_ip_details(ip_address: Optional[str], original_config_str: str, proxies_to_use: Optional[dict]):
+    global FIN_CONF
+    country_code = "XX"
+    if ip_address:
+        if ip_address in _IP_COUNTRY_CACHE: country_code = _IP_COUNTRY_CACHE[ip_address]
+        else:
+            try:
+                country_code = fetch_exit_country_code_via_proxy(proxies_to_use)
+                _IP_COUNTRY_CACHE[ip_address] = country_code
+            except Exception: pass
+    flag_emoji = country_code_to_emoji(country_code)
+    config_stripped = original_config_str.strip()
+    if config_stripped.startswith("vmess://"):
+        try:
+            encoded_part = config_stripped.split("://", 1)[1]
+            missing_padding = len(encoded_part) % 4
+            if missing_padding: encoded_part += '=' * (4 - missing_padding)
+            vmess_data = json.loads(base64.b64decode(encoded_part).decode('utf-8'))
+            base_name = vmess_data.get("ps", "").split("::")[0].strip()
+            vmess_data["ps"] = f"{base_name}::{flag_emoji}"
+            updated_json_str = json.dumps(vmess_data, ensure_ascii=False, separators=(',', ':'))
+            updated_base64_str = base64.b64encode(updated_json_str.encode('utf-8')).decode('utf-8').rstrip("=")
+            FIN_CONF.append(f"vmess://{updated_base64_str}")
+        except Exception: FIN_CONF.append(original_config_str)
+    else:
+        parts = config_stripped.split("#", 1)
+        config_base = parts[0]
+        original_tag = urllib.parse.unquote(parts[1]) if len(parts) > 1 else ""
+        current_tag_base = original_tag.split("::")[0].strip()
+        new_tag_unencoded = f"{current_tag_base}::{flag_emoji}"
+        new_tag_encoded = urllib.parse.quote(new_tag_unencoded)
+        FIN_CONF.append(f"{config_base}#{new_tag_encoded}")
+
+def s_xray(conf_path, t):
+    xray_abs = os.path.abspath("xray/xray")
+    proc = subprocess.Popen([xray_abs, 'run', '-c', conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process_manager.add_process(f"xray_{t}", proc.pid)
+
+def s_hy2(path_file, t):
+    hy = subprocess.Popen(['hy2/hysteria', 'client', '-c', path_file], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process_manager.add_process(f"hysteria_{t}", hy.pid)
+
+def process_ping(i: str, t: int, is_dict: bool, counter=2):
+    global FIN_CONF
+    print(f"Testing config #{t}: {i.strip()[:60]}...")
+    local_t = t % 100
+    path_test_file = f"xray/config_test_ping{t}.json"
+    hy2_path_test_file = f"hy2/config{t}.yaml"
+    is_wrong = False
+    try:
+        conf_str = parse_configs(i, cv=local_t + 2, hy2_path=hy2_path_test_file)
+        with open(path_test_file, "w") as f: f.write(conf_str)
+    except Exception as E:
+        print(f"Error parsing config #{t}: {E}")
+        is_wrong = True
+
+    if not is_wrong:
+        try:
+            with open(path_test_file, "r") as f: temp3 = json.load(f)
+            port = temp3["inbounds"][1]["port"]
+        except Exception as e:
+            print(f"Config #{t}: cannot read test config: {e}")
+            if os.path.exists(path_test_file): os.remove(path_test_file)
+            if os.path.exists(hy2_path_test_file): os.remove(hy2_path_test_file)
+            return
+
+        if i.startswith("hy2://") or i.startswith("hysteria2://"): s_hy2(hy2_path_test_file, t)
+        s_xray(path_test_file, t)
+
+        if not wait_for_port(f"127.0.0.{local_t+2}", port, timeout=PORT_WAIT_TIMEOUT):
+            print(f"Config #{t}: proxy port {port} not ready in {PORT_WAIT_TIMEOUT}s, skipping.")
+            if os.path.exists(path_test_file): os.remove(path_test_file)
+            if os.path.exists(hy2_path_test_file): os.remove(hy2_path_test_file)
+            if i.startswith("hy2://") or i.startswith("hysteria2://"): process_manager.stop_process(f"hysteria_{t}")
+            process_manager.stop_process(f"xray_{t}")
+            return
+
+        if os.path.exists(path_test_file): os.remove(path_test_file)
+        if os.path.exists(hy2_path_test_file): os.remove(hy2_path_test_file)
+
+        proxies = {"http": f"http://127.0.0.{local_t+2}:{port}", "https": f"http://127.0.0.{local_t+2}:{port}"}
+
+        result = "-1"
+        try:
+            url = test_link_
+            headers = {"Connection": "close"}
+            start = time.time()
+            response = requests.get(url, proxies=proxies, timeout=TEST_TIMEOUT, headers=headers)
+            elapsed = (time.time() - start) * 1000
+            if response.status_code == 204 or (response.status_code == 200 and len(response.content) == 0):
+                result = f"{int(elapsed)}"
+            else:
+                raise IOError(f"Connection test error, status code: {response.status_code}")
+        except Exception as e:
+            print(f"Ping failed for config #{t}: {e}")
+            result = "-1"
+
+        if result != "-1":
+            print(f"SUCCESS: Config #{t} is alive with ping {result}ms.")
+            if CHECK_LOC:
+                public_ip = get_public_ipv4(local_t + 2, port)
+                if CHECK_IRAN:
+                    if public_ip in _IRAN_CACHE: accessible = _IRAN_CACHE[public_ip]
+                    else:
+                        accessible = is_ip_accessible_from_iran_via_check_host(public_ip, proxies)
+                        _IRAN_CACHE[public_ip] = accessible
+                    if not accessible: get_ip_details(public_ip, i, proxies)
+                else: get_ip_details(public_ip, i, proxies)
+            else:
+                FIN_CONF.append(i)
+
+        if i.startswith("hy2://") or i.startswith("hysteria2://"): process_manager.stop_process(f"hysteria_{t}")
+        process_manager.stop_process(f"xray_{t}")
+
+def set_initial_tag(configs_list: list, new_tag: str) -> list:
+    modified_configs = []
+    for config in configs_list:
+        config = config.strip()
+        if not config: continue
+        if config.startswith("vmess://"):
+            try:
+                encoded_part = config.split("://", 1)[1].split("#", 1)[0]
+                missing_padding = len(encoded_part) % 4
+                if missing_padding: encoded_part += '=' * (4 - missing_padding)
+                decoded_json_str = base64.b64decode(encoded_part).decode('utf-8')
+                vmess_data = json.loads(decoded_json_str)
+                vmess_data['ps'] = new_tag
+                updated_json_str = json.dumps(vmess_data, separators=(',', ':'), ensure_ascii=False)
+                updated_base64_str = base64.b64encode(updated_json_str.encode('utf-8')).decode('utf-8').rstrip("=")
+                modified_configs.append(f"vmess://{updated_base64_str}")
+            except Exception: modified_configs.append(config)
+        else:
+            base_config = config.split('#', 1)[0]
+            encoded_tag = urllib.parse.quote(new_tag)
+            modified_configs.append(f"{base_config}#{encoded_tag}")
+    return modified_configs
+
+def country_code_to_emoji(code: str) -> str:
+    if not isinstance(code, str) or len(code) != 2: return "🏴‍☠️"
+    code = code.upper()
+    if code == "XX": return "🏴‍☠️"
+    return "".join(chr(ord(c) + 127397) for c in code)
+
+def save_sorted_configs(configs: list):
+    if not configs:
+        print("لیست کانفیگ نهایی خالی است.")
+        os.makedirs("output", exist_ok=True)
+        open("output/merged.txt", 'w').close()
+        open("output/merged_b64.txt", 'w').close()
+        return
     
+    os.makedirs("output", exist_ok=True)
+    print("\n" + "="*50)
+    print("شروع مرحله ذخیره‌سازی نهایی...")
+    print(f"تعداد کل کانفیگ‌های موفق برای ذخیره: {len(configs)}")
+    print("="*50 + "\n")
+
+    configs_by_protocol = {}
+    configs_by_country = {}
+    for i, config in enumerate(configs):
+        config = config.strip()
+        if not config: continue
+        protocol = "unknown"
+        if config.startswith("vless://"): protocol = "vless"
+        elif config.startswith("vmess://"): protocol = "vmess"
+        elif config.startswith("trojan://"): protocol = "trojan"
+        elif config.startswith("ss://"): protocol = "ss"
+        elif config.startswith("hy2://") or config.startswith("hysteria2://"): protocol = "hy2"
+        elif config.startswith("wireguard://"): protocol = "wireguard"
+        elif config.startswith("socks://"): protocol = "socks"
+        configs_by_protocol.setdefault(protocol, []).append(config)
+        
+        flag_emoji = "❓"
+        try:
+            tag = ""
+            if config.startswith("vmess://"):
+                encoded_part = config.split("://", 1)[1]
+                missing_padding = len(encoded_part) % 4
+                if missing_padding: encoded_part += '=' * (4 - missing_padding)
+                decoded_json = base64.b64decode(encoded_part).decode('utf-8')
+                tag = json.loads(decoded_json).get('ps', '')
+            else:
+                tag = urllib.parse.unquote(config.split('#', 1)[1])
+            if '::' in tag:
+                potential_emoji = tag.rsplit('::', 1)[1]
+                if potential_emoji: flag_emoji = potential_emoji
+        except Exception: pass
+        configs_by_country.setdefault(flag_emoji, []).append(config)
+
+    def write_to_file(filepath, data_list):
+        if not data_list: return
+        try:
+            filepath = os.path.join("output", filepath)
+            full_content_list = [FILE_HEADER_TEXT] + data_list
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("\n".join(full_content_list))
+            print(f"فایل '{filepath}' با موفقیت با {len(data_list)} کانفیگ ذخیره شد.")
+        except Exception as e: print(f"خطا در نوشتن فایل '{filepath}': {e}")
+
+    write_to_file("merged.txt", configs)
+    write_to_file("merged_b64.txt", [base64.b64encode(c.encode('utf-8')).decode('utf-8') for c in configs])
+    
+    for protocol, proto_configs in configs_by_protocol.items():
+        if protocol != "unknown":
+            write_to_file(f"{protocol}.txt", proto_configs)
+            write_to_file(f"{protocol}_b64.txt", [base64.b64encode(c.encode('utf-8')).decode('utf-8') for c in proto_configs])
+    
+    os.makedirs(os.path.join("output", "loc"), exist_ok=True)
+    for flag_emoji, country_configs in configs_by_country.items():
+        filename = os.path.join("loc", f"{flag_emoji}.txt")
+        write_to_file(filename, country_configs)
+
+if __name__ == "__main__":
+    LOCAL_MERGED = "output/merged.txt"
     if not os.path.exists(LOCAL_MERGED):
-        print(f"ERROR: {LOCAL_MERGED} not found! Сначала запустите merge.py")
+        print(f"ERROR: {LOCAL_MERGED} not found!")
         sys.exit(1)
         
     print(f"Reading configs from local file {LOCAL_MERGED}...")
@@ -1358,14 +1696,11 @@ if __name__ == "__main__":
         sys.exit(0)
         
     print(f"Starting the check process for {len(tagged_lines)} configs...")
-    
     with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
         futures = [executor.submit(process_ping, i, t, False) for t, i in enumerate(tagged_lines)]
         for fut in as_completed(futures):
-            try:
-                fut.result()
-            except Exception as e:
-                print(f"Worker error: {e}")
+            try: fut.result()
+            except Exception as e: print(f"Worker error: {e}")
                 
     print("\nSaving final results...")
     save_sorted_configs(FIN_CONF)
