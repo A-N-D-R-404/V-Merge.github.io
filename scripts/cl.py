@@ -45,12 +45,8 @@ FIN_CONF = []
 CHECK_LOC = True
 CHECK_IRAN = False
 CHECK_HOST_IRANIAN_NODES = [
-    "ir1.node.check-host.net",
-    "ir3.node.check-host.net",
-    "ir4.node.check-host.net",
-    "ir5.node.check-host.net",
-    "ir6.node.check-host.net",
-    "ir7.node.check-host.net",
+    "ir1.node.check-host.net", "ir3.node.check-host.net", "ir4.node.check-host.net",
+    "ir5.node.check-host.net", "ir6.node.check-host.net", "ir7.node.check-host.net",
     "ir8.node.check-host.net",
 ]
 
@@ -233,14 +229,9 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
                         "port": int(match.group(2))
                     })
             protocol_handlers = {
-                "vless": parse_vless,
-                "vmess": parse_vmess,
-                "trojan": parse_trojan,
-                "hy2": parse_hysteria,
-                "hysteria2": parse_hysteria,
-                "ss": parse_shadowsocks,
-                "socks": parse_socks,
-                "wireguard": parse_wireguard
+                "vless": parse_vless, "vmess": parse_vmess, "trojan": parse_trojan,
+                "hy2": parse_hysteria, "hysteria2": parse_hysteria,
+                "ss": parse_shadowsocks, "socks": parse_socks, "wireguard": parse_wireguard
             }
             parser = protocol_handlers.get(protocol)
             if not parser:
@@ -254,68 +245,40 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
         query = re.split(r"\?", config, maxsplit=1)[1] if "?" in config else ""
         params = parse_query_params(query)
         host_params = {
-            "tcp": params.get("host", None),
-            "ws": params.get("host", None),
-            "h2": params.get("host", None),
-            "httpupgrade": params.get("host", None),
-            "xhttp": params.get("host", None),
-            "splithttp": params.get("host", None),
-            "quic": params.get("quicSecurity", None),
-            "grpc": params.get("authority", None)
+            "tcp": params.get("host", None), "ws": params.get("host", None),
+            "h2": params.get("host", None), "httpupgrade": params.get("host", None),
+            "xhttp": params.get("host", None), "splithttp": params.get("host", None),
+            "quic": params.get("quicSecurity", None), "grpc": params.get("authority", None)
         }
         path_params = {
-            "ws": params.get("path", None),
-            "h2": params.get("path", None),
-            "httpupgrade": params.get("path", None),
-            "splithttp": params.get("path", None),
-            "xhttp": params.get("path", None),
-            "kcp": params.get("seed", None),
-            "grpc": params.get("serviceName", None),
-            "quic": params.get("key", None)
+            "ws": params.get("path", None), "h2": params.get("path", None),
+            "httpupgrade": params.get("path", None), "splithttp": params.get("path", None),
+            "xhttp": params.get("path", None), "kcp": params.get("seed", None),
+            "grpc": params.get("serviceName", None), "quic": params.get("key", None)
         }
         return ConfigParams(
-            **common,
-            security=params.get("security", ""),
-            encryption=params.get("encryption", "none"),
-            type=params.get("type", "tcp"),
-            host=host_params.get(params.get("type", "tcp"), None),
-            path=path_params.get(params.get("type", "tcp"), None),
-            flow=params.get("flow", ""),
-            sni=params.get("sni", ""),
-            fp=params.get("fp", ""),
-            alpn=params.get("alpn", None),
-            pbk=params.get("pbk", ""),
-            sid=params.get("sid", ""),
-            spx=params.get("spx", ""),
+            **common, security=params.get("security", ""), encryption=params.get("encryption", "none"),
+            type=params.get("type", "tcp"), host=host_params.get(params.get("type", "tcp"), None),
+            path=path_params.get(params.get("type", "tcp"), None), flow=params.get("flow", ""),
+            sni=params.get("sni", ""), fp=params.get("fp", ""), alpn=params.get("alpn", None),
+            pbk=params.get("pbk", ""), sid=params.get("sid", ""), spx=params.get("spx", ""),
             mode=params.get("mode", None)
         )
 
     def parse_vmess(config: str, common: dict) -> ConfigParams:
         encoded_part = config.split("://")[1]
         missing_padding = len(encoded_part) % 4
-        if missing_padding:
-            encoded_part += '=' * (4 - missing_padding)
+        if missing_padding: encoded_part += '=' * (4 - missing_padding)
         decoded = base64.b64decode(encoded_part).decode("utf-8")
         vmess_data = json.loads(decoded)
-        address = vmess_data.get("add", "")
-        port = int(vmess_data.get("port", 0))
-        tag = vmess_data.get("ps", "none")
-        sec = vmess_data.get("tls", "")
         return ConfigParams(
-            protocol=common.get("protocol", ""),
-            address=address,
-            port=port,
-            tag=tag,
-            security=sec,
-            id=vmess_data.get("id", ""),
-            alter_id=int(vmess_data.get("aid", 0)),
-            scy=vmess_data.get("scy", ""),
-            sni=vmess_data.get("sni", ""),
-            fp=vmess_data.get("fp", ""),
-            type=vmess_data.get("net", "tcp"),
-            host=vmess_data.get("host", None),
-            path=vmess_data.get("path", None),
-            alpn=vmess_data.get("alpn", None),
+            protocol=common.get("protocol", ""), address=vmess_data.get("add", ""),
+            port=int(vmess_data.get("port", 0)), tag=vmess_data.get("ps", "none"),
+            security=vmess_data.get("tls", ""), id=vmess_data.get("id", ""),
+            alter_id=int(vmess_data.get("aid", 0)), scy=vmess_data.get("scy", ""),
+            sni=vmess_data.get("sni", ""), fp=vmess_data.get("fp", ""),
+            type=vmess_data.get("net", "tcp"), host=vmess_data.get("host", None),
+            path=vmess_data.get("path", None), alpn=vmess_data.get("alpn", None),
             mode=vmess_data.get("mode", None)
         )
 
@@ -324,81 +287,53 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
         params = parse_query_params(query)
         password = re.search(r'trojan://([^@]+)@', config).group(1) if "trojan://" in config else ""
         host_params = {
-            "tcp": params.get("host", None),
-            "ws": params.get("host", None),
-            "h2": params.get("host", None),
-            "httpupgrade": params.get("host", None),
-            "xhttp": params.get("host", None),
-            "splithttp": params.get("host", None),
-            "quic": params.get("quicSecurity", None),
-            "grpc": params.get("authority", None)
+            "tcp": params.get("host", None), "ws": params.get("host", None),
+            "h2": params.get("host", None), "httpupgrade": params.get("host", None),
+            "xhttp": params.get("host", None), "splithttp": params.get("host", None),
+            "quic": params.get("quicSecurity", None), "grpc": params.get("authority", None)
         }
         path_params = {
-            "ws": params.get("path", None),
-            "h2": params.get("path", None),
-            "httpupgrade": params.get("path", None),
-            "splithttp": params.get("path", None),
-            "xhttp": params.get("path", None),
-            "kcp": params.get("seed", None),
-            "grpc": params.get("serviceName", None),
-            "quic": params.get("key", None)
+            "ws": params.get("path", None), "h2": params.get("path", None),
+            "httpupgrade": params.get("path", None), "splithttp": params.get("path", None),
+            "xhttp": params.get("path", None), "kcp": params.get("seed", None),
+            "grpc": params.get("serviceName", None), "quic": params.get("key", None)
         }
         return ConfigParams(
-            **common,
-            security="tls",
-            ss_password=password,
-            sni=params.get("sni", ""),
-            fp=params.get("fp", ""),
-            alpn=params.get("alpn", None),
-            pbk=params.get("pbk", ""),
-            sid=params.get("sid", ""),
-            type=params.get("type", "tcp"),
+            **common, security="tls", ss_password=password, sni=params.get("sni", ""),
+            fp=params.get("fp", ""), alpn=params.get("alpn", None), pbk=params.get("pbk", ""),
+            sid=params.get("sid", ""), type=params.get("type", "tcp"),
             host=host_params.get(params.get("type", "tcp"), None),
             path=path_params.get(params.get("type", "tcp"), None),
-            spx=params.get("spx", ""),
-            mode=params.get("mode", None)
+            spx=params.get("spx", ""), mode=params.get("mode", None)
         )
 
     def parse_hysteria(config: str, common: dict) -> ConfigParams:
         query = re.split(r"\?", config, maxsplit=1)[1] if "?" in config else ""
         params = parse_query_params(query)
         return ConfigParams(
-            **common,
-            security="tls",
-            hy2_insecure=params.get("insecure", "0") == "1",
+            **common, security="tls", hy2_insecure=params.get("insecure", "0") == "1",
             hy2_obfs_password=params.get("obfs-password", ""),
             hy2_hop_interval=int(params.get("hopInterval", 30)),
-            hy2_pinsha256=params.get("pinSHA256", ""),
-            hy2_obfs=params.get("obfs", ""),
-            sni=params.get("sni", common.get("address", "")),
-            alpn=params.get("alpn", None),
+            hy2_pinsha256=params.get("pinSHA256", ""), hy2_obfs=params.get("obfs", ""),
+            sni=params.get("sni", common.get("address", "")), alpn=params.get("alpn", None)
         )
 
     def parse_socks(config: str, common: dict) -> ConfigParams:
         auth_part = config.split("://")[1].split("@")[0]
         user_pass = base64.b64decode(auth_part).decode("utf-8").split(":")
         return ConfigParams(
-            **common,
-            socks_user=user_pass[0],
-            ss_password=user_pass[1],
-            security="none"
+            **common, socks_user=user_pass[0], ss_password=user_pass[1], security="none"
         )
 
     def parse_wireguard(config: str, common: dict) -> ConfigParams:
         query = re.split(r"\?", config, maxsplit=1)[1] if "?" in config else ""
         params = parse_query_params(query)
         return ConfigParams(
-            **common,
-            wg_reserved=params.get("reserved", ""),
-            wg_public_key=params.get("publickey", ""),
-            wg_endpoint=params.get("endpoint", ""),
-            wg_keep_alive=int(params.get("keepalive", 5)),
-            wg_mtu=int(params.get("mtu", 0)),
-            wg_address=params.get("address", ""),
-            wnoise=params.get("wnoise", "quic"),
-            wnoisecount=params.get("wnoisecount", "15"),
-            wnoisedelay=params.get("wnoisedelay", "1-3"),
-            wpayloadsize=params.get("wpayloadsize", "1-8")
+            **common, wg_reserved=params.get("reserved", ""), wg_public_key=params.get("publickey", ""),
+            wg_endpoint=params.get("endpoint", ""), wg_keep_alive=int(params.get("keepalive", 5)),
+            wg_mtu=int(params.get("mtu", 0)), wg_address=params.get("address", ""),
+            wnoise=params.get("wnoise", "quic"), wnoisecount=params.get("wnoisecount", "15"),
+            wnoisedelay=params.get("wnoisedelay", "1-3"), wpayloadsize=params.get("wpayloadsize", "1-8")
         )
 
     def parse_shadowsocks(config: str, common: dict) -> ConfigParams:
@@ -407,31 +342,24 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
         ss_password = ""
         address = common.get("address", "")
         port = common.get("port", 0)
-
         try:
             if "@" not in main_part:
                 decoded_str = base64.b64decode(main_part + "=" * (-len(main_part) % 4)).decode("utf-8")
-                if "@" in decoded_str:
-                    main_part = decoded_str
-
+                if "@" in decoded_str: main_part = decoded_str
             if "@" in main_part:
                 parts = main_part.split("@", 1)
                 auth_encoded = parts[0]
                 server_info = parts[1]
-                
                 try:
                     auth_decoded_str = base64.b64decode(auth_encoded + "=" * (-len(auth_encoded) % 4)).decode("utf-8")
                 except Exception:
                     auth_decoded_str = auth_encoded
-
                 method_pass_parts = auth_decoded_str.split(":", 1)
                 if len(method_pass_parts) == 2:
                     ss_method = method_pass_parts[0]
                     ss_password = method_pass_parts[1]
                 else:
-                    if ":" not in auth_decoded_str and auth_decoded_str:
-                        ss_password = auth_decoded_str
-                
+                    if ":" not in auth_decoded_str and auth_decoded_str: ss_password = auth_decoded_str
                 if ":" in server_info:
                     server_parts = server_info.rsplit(":", 1)
                     address = server_parts[0]
@@ -440,18 +368,8 @@ def parse_configs(conifg, num=0, cv=1, hy2_path="hy2/config.yaml", is_hy2=False)
                     address = server_info
         except Exception:
             return ConfigParams(protocol="", address="", port=0)
-
-        if not address or port == 0:
-            return ConfigParams(protocol="", address="", port=0)
-
-        return ConfigParams(
-            **common,
-            ss_method=ss_method,
-            ss_password=ss_password,
-            address=address,
-            port=port,
-            security="none",
-        )
+        if not address or port == 0: return ConfigParams(protocol="", address="", port=0)
+        return ConfigParams(**common, ss_method=ss_method, ss_password=ss_password, address=address, port=port, security="none")
 
     def parse_query_params(query: str) -> Dict[str, str]:
         params = {}
@@ -1614,69 +1532,45 @@ def save_sorted_configs(configs: list):
         print("لیست کانفیگ نهایی خالی است.")
         os.makedirs("output", exist_ok=True)
         open("output/merged.txt", 'w').close()
-        open("output/merged_b64.txt", 'w').close()
         return
     
     os.makedirs("output", exist_ok=True)
     print("\n" + "="*50)
-    print("شروع مرحله ذخیره‌سازی نهایی...")
-    print(f"تعداد کل کانفیگ‌های موفق برای ذخیره: {len(configs)}")
-    print("="*50 + "\n")
+    print(f"ذخیره {len(configs)} کانفیگ در فایل نهایی...")
+    
+    filepath = "output/merged.txt"
+    try:
+        full_content_list = [FILE_HEADER_TEXT] + configs
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write("\n".join(full_content_list))
+        print(f"فایل '{filepath}' با موفقیت ذخیره شد.")
+    except Exception as e:
+        print(f"خطا در نوشتن فایل '{filepath}': {e}")
+        return
 
-    configs_by_protocol = {}
-    configs_by_country = {}
-    for i, config in enumerate(configs):
-        config = config.strip()
-        if not config: continue
-        protocol = "unknown"
-        if config.startswith("vless://"): protocol = "vless"
-        elif config.startswith("vmess://"): protocol = "vmess"
-        elif config.startswith("trojan://"): protocol = "trojan"
-        elif config.startswith("ss://"): protocol = "ss"
-        elif config.startswith("hy2://") or config.startswith("hysteria2://"): protocol = "hy2"
-        elif config.startswith("wireguard://"): protocol = "wireguard"
-        elif config.startswith("socks://"): protocol = "socks"
-        configs_by_protocol.setdefault(protocol, []).append(config)
+    print("\nЗапрос к API Happ для создания ссылки на проверенные конфиги...")
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            final_content = f.read()
         
-        flag_emoji = "❓"
-        try:
-            tag = ""
-            if config.startswith("vmess://"):
-                encoded_part = config.split("://", 1)[1]
-                missing_padding = len(encoded_part) % 4
-                if missing_padding: encoded_part += '=' * (4 - missing_padding)
-                decoded_json = base64.b64decode(encoded_part).decode('utf-8')
-                tag = json.loads(decoded_json).get('ps', '')
+        response = requests.post(
+            "https://api.happ.agency/encrypt",
+            json={"config": final_content},
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            happ_link = response.json().get("link", "")
+            if happ_link:
+                with open("output/happ_link.txt", "w", encoding="utf-8") as f:
+                    f.write(happ_link)
+                print(f"[✓] Ссылка Happ успешно создана: {happ_link[:30]}...")
             else:
-                tag = urllib.parse.unquote(config.split('#', 1)[1])
-            if '::' in tag:
-                potential_emoji = tag.rsplit('::', 1)[1]
-                if potential_emoji: flag_emoji = potential_emoji
-        except Exception: pass
-        configs_by_country.setdefault(flag_emoji, []).append(config)
-
-    def write_to_file(filepath, data_list):
-        if not data_list: return
-        try:
-            filepath = os.path.join("output", filepath)
-            full_content_list = [FILE_HEADER_TEXT] + data_list
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write("\n".join(full_content_list))
-            print(f"فایل '{filepath}' با موفقیت با {len(data_list)} کانفیگ ذخیره شد.")
-        except Exception as e: print(f"خطا در نوشتن فایل '{filepath}': {e}")
-
-    write_to_file("merged.txt", configs)
-    write_to_file("merged_b64.txt", [base64.b64encode(c.encode('utf-8')).decode('utf-8') for c in configs])
-    
-    for protocol, proto_configs in configs_by_protocol.items():
-        if protocol != "unknown":
-            write_to_file(f"{protocol}.txt", proto_configs)
-            write_to_file(f"{protocol}_b64.txt", [base64.b64encode(c.encode('utf-8')).decode('utf-8') for c in proto_configs])
-    
-    os.makedirs(os.path.join("output", "loc"), exist_ok=True)
-    for flag_emoji, country_configs in configs_by_country.items():
-        filename = os.path.join("loc", f"{flag_emoji}.txt")
-        write_to_file(filename, country_configs)
+                print("[!] API вернул пустую ссылку.")
+        else:
+            print(f"[!] Ошибка API Happ: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"[!] Не удалось создать ссылку Happ: {e}")
 
 if __name__ == "__main__":
     LOCAL_MERGED = "output/merged.txt"
