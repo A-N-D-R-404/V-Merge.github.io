@@ -1529,23 +1529,23 @@ def country_code_to_emoji(code: str) -> str:
 
 def save_sorted_configs(configs: list):
     if not configs:
-        print("لیست کانفیگ نهایی خالی است.")
+        print("Список итоговых конфигов пуст. Создаем пустой файл.")
         os.makedirs("output", exist_ok=True)
         open("output/merged.txt", 'w').close()
         return
     
     os.makedirs("output", exist_ok=True)
     print("\n" + "="*50)
-    print(f"ذخیره {len(configs)} کانفیگ در فایل نهایی...")
+    print(f"Сохранение {len(configs)} конфигов в итоговый файл...")
     
     filepath = "output/merged.txt"
     try:
         full_content_list = [FILE_HEADER_TEXT] + configs
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(full_content_list))
-        print(f"فایل '{filepath}' با موفقیت ذخیره شد.")
+        print(f"Файл '{filepath}' успешно сохранен.")
     except Exception as e:
-        print(f"خطا در نوشتن فایل '{filepath}': {e}")
+        print(f"Ошибка при записи файла '{filepath}': {e}")
         return
 
     print("\nЗапрос к API Happ для создания ссылки на проверенные конфиги...")
@@ -1553,8 +1553,9 @@ def save_sorted_configs(configs: list):
         with open(filepath, "r", encoding="utf-8") as f:
             final_content = f.read()
         
+        # ЗАМЕНИТЕ URL, если в вашем merge.py используется другой!
         response = requests.post(
-            "https://api.happ.agency/encrypt",
+            "https://api.happ.agency/api/encrypt", 
             json={"config": final_content},
             timeout=15
         )
