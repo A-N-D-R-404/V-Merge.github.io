@@ -2,7 +2,7 @@ name: Update merged configs
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '17 */2 * * *'
   workflow_dispatch:
   push:
     branches: [main]
