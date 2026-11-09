@@ -2,7 +2,7 @@ name: Update merged configs
 
 on:
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -62,9 +62,6 @@ jobs:
 
           git diff --staged --quiet || git commit -m "auto: update configs + geo cache + state + dead cache + happ link [skip ci]"
           git push
-
-      - name: Keepalive Workflow
-        uses: gautamkrishnar/keepalive-workflow@v2
 
       - name: Trigger Bot Broadcast
         run: |
