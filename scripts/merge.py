@@ -1430,6 +1430,7 @@ def check_configs(links: List[str]) -> List[str]:
 
     total = len(filtered_links)
     if total == 0:
+        save_dead_cache(dead_cache)
         return []
 
     print(
@@ -1439,43 +1440,45 @@ def check_configs(links: List[str]) -> List[str]:
     working = []
     stop_event = threading.Event()
 
-    with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
-        futures = {}
-        for i, link in enumerate(filtered_links):
-            if stop_event.is_set():
-                break
-            fut = executor.submit(check_one_config, link, i, total)
-            futures[fut] = link
-
-        for fut in as_completed(futures):
-            link = futures[fut]
-            if stop_event.is_set():
-                continue
-            try:
-                res = fut.result()
-            except Exception as e:
-                print(f"[!] Ошибка future: {e}")
-                res = None
-
-            if res is not None:
-                working.append(res)
-                print(
-                    f"🎯 Набрано рабочих конфигов: {len(working)}/{MAX_WORKING_LIMIT}"
-                )
-
-                if len(working) >= MAX_WORKING_LIMIT:
-                    print(
-                        f"\n🛑 Лимит в {MAX_WORKING_LIMIT} рабочих конфигов достигнут! Экстренно останавливаем проверку."
-                    )
-                    stop_event.set()
-                    for f in futures:
-                        f.cancel()
-                    executor.shutdown(wait=False, cancel_futures=True)
+    try:
+        with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
+            futures = {}
+            for i, link in enumerate(filtered_links):
+                if stop_event.is_set():
                     break
-            else:
-                dead_cache.add(get_config_hash(link))
+                fut = executor.submit(check_one_config, link, i, total)
+                futures[fut] = link
 
-    save_dead_cache(dead_cache)
+            for fut in as_completed(futures):
+                link = futures[fut]
+                if stop_event.is_set():
+                    continue
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    print(f"[!] Ошибка future: {e}")
+                    res = None
+
+                if res is not None:
+                    working.append(res)
+                    print(
+                        f"🎯 Набрано рабочих конфигов: {len(working)}/{MAX_WORKING_LIMIT}"
+                    )
+
+                    if len(working) >= MAX_WORKING_LIMIT:
+                        print(
+                            f"\n🛑 Лимит в {MAX_WORKING_LIMIT} рабочих конфигов достигнут! Экстренно останавливаем проверку."
+                        )
+                        stop_event.set()
+                        for f in futures:
+                            f.cancel()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+                else:
+                    dead_cache.add(get_config_hash(link))
+    finally:
+        save_dead_cache(dead_cache)
+
     print(
         f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Записей в черном списке: {len(dead_cache)}"
     )
