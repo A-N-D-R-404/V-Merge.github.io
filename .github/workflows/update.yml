@@ -2,7 +2,6 @@ name: Update merged configs
 
 on:
   schedule:
-    # Запуск каждые 2 часа на 17-й минуте по UTC (избегаем пиковой нагрузки ровных часов)
     - cron: '17 */2 * * *'
   workflow_dispatch:
   push:
