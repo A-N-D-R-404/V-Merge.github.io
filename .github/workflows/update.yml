@@ -57,9 +57,10 @@ jobs:
                   output/merged.base64.txt \
                   output/happ_link.txt \
                   scripts/geo_cache.json \
-                  scripts/sources_state.json
+                  scripts/sources_state.json \
+                  scripts/dead_cache.json
 
-          git commit -m "auto: update configs + geo cache + state + happ link [skip ci]"
+          git diff --staged --quiet || git commit -m "auto: update configs + geo cache + state + dead cache + happ link [skip ci]"
           git push
 
       - name: Trigger Bot Broadcast
