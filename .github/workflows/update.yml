@@ -1,7 +1,8 @@
-name: Update merged configs
+Name: Update merged configs
 
 on:
   schedule:
+    # Запуск каждый час в 15 минут (работает ТОЛЬКО если файл находится в ветке по умолчанию, например main)
     - cron: '15 * * * *'
   workflow_dispatch:
   push:
