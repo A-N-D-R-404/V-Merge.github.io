@@ -1,8 +1,6 @@
 name: Update merged configs
 
 on:
-  schedule:
-    - cron: '* * * * *'   # ⚠️ ВРЕМЕННО: каждую минуту, только для проверки!
   workflow_dispatch:
   push:
     branches: [main]
