@@ -7,9 +7,9 @@
   "https://github.com/fag2548-pixel/FDDE-vpn/raw/refs/heads/main/Vpn%20config": "hash:b6eab1273671",
   "https://github.com/slxkware/Vless-list/raw/refs/heads/main/Black%20Vless.txt": "hash:5d245bc74381",
   "https://github.com/svinakraft-maker/FlareFeed/raw/refs/heads/main/public/podpiska.txt": "hash:6a0873afa7be",
-  "https://raw.githubusercontent.com/Andrejewild/vless-free-keys-russia/refs/heads/main/sub.txt": "hash:6f9ed92c858c",
-  "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/BLACK_LTE.txt": "hash:0763f46c850c",
-  "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/WHITE_LITE.txt": "hash:ee77b6f5c7e4",
+  "https://raw.githubusercontent.com/Andrejewild/vless-free-keys-russia/refs/heads/main/sub.txt": "hash:5871b04d4ad0",
+  "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/BLACK_LTE.txt": "hash:7b335d0cfab3",
+  "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/WHITE_LITE.txt": "hash:2784034c4ed1",
   "https://raw.githubusercontent.com/flaafix/AetrisVPN-black-list/refs/heads/main/configs.txt": "2026-11-11 10:59",
   "https://raw.githubusercontent.com/flaafix/AetrisVPN/refs/heads/main/AetrisVPN.txt": "2026-11-11 06:22",
   "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS_mobile.txt": "2026-11-11 11:27",
@@ -37,7 +37,7 @@
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/25.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/6.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/all-secure.txt": null,
-  "https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt": "hash:688ff83768ce",
-  "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt": "hash:34d948076c64",
-  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:727bd7c2c384"
+  "https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt": "hash:e3403026b354",
+  "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt": "hash:f509a5d46229",
+  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:b45d505b9b9f"
 }
