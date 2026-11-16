@@ -12,8 +12,8 @@
   "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/WHITE_LITE.txt": "hash:9f035bc75cb1",
   "https://raw.githubusercontent.com/flaafix/AetrisVPN-black-list/refs/heads/main/configs.txt": "2026-11-16 12:44",
   "https://raw.githubusercontent.com/flaafix/AetrisVPN/refs/heads/main/AetrisVPN.txt": "2026-11-16 21:37",
-  "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS_mobile.txt": "2026-11-16 21:05",
-  "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt": "2026-11-16 20:10",
+  "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS_mobile.txt": "2026-11-16 22:39",
+  "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt": "2026-11-16 22:26",
   "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/refs/heads/main/output/vless.txt": "hash:0dfd8cfa6d2a",
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-1.txt": "hash:bde44c5df05d",
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-10.txt": null,
@@ -37,7 +37,7 @@
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/25.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/6.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/all-secure.txt": null,
-  "https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt": "hash:51cbe0f8400c",
-  "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt": "hash:ecb38e2a5365",
-  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:dc0b6fd450dc"
+  "https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt": "hash:62032e67cbf6",
+  "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt": "hash:f1c3a34583e6",
+  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:2de9aeffe08c"
 }
