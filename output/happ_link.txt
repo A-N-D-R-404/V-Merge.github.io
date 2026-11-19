@@ -1,5 +1,5 @@
 {
-  "encrypted_link": "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt",
-  "updated_at": "19.11.2026 10:04",
-  "config_count": 340
+  "encrypted_link": "happ://crypt5/fzvdmpVeEI33VC5flYUDdY6f20imp/0h8h6y0IWJSe7K64gGK+CVQ8H1fSgiRPlJzl82iGAVDfSY2fL7Sd3kz2hTOylkc199Ip6a5zH2+qgPD4Fwh2sTSbfWfXHn/BcWTFYMXHnZTXMEycTF1rr7VTBKl0IErMetKct7UjGCc6ZV0u35WfxTTsuSQQ3CyAtLAeYreH0fXyFgAXDVQ3xM0UkCcxSf1Ch/YArEdp==0p1Xf0hz/gO1g7H9bNV1tturSiHpRKSmz0+T4g8BGVy2n86LRzQprjrVrz/1/mN9TEsUyR5kg3bcTdbLR9ddRCAub7ESdpmHo4BA0sKVnDJ6zjpmNkUhogJ+/GcV4qba466XDrCIXnjyVa347vkmG9MAFBFOnB1Z8qvOGr+eIWJJZC2XzaGIncEk6KXpZg1hAufRcQ+nLnf7r15c2FhUmj0P2I2bmoYIZxkOgYoDtc+d0J+Tplg21TOF8FuYha2SJNfO3rcVKTBEym/FTaw2SVVXYQHsI4840tOOPYArCLaE+YsaDVmCXfTFRtX7NydN3PBRScBD7PAf4Djjxwtkt52DYJWM0tHlz8LITuPbsGtA5yvoTXFSQ0ua3hHiRjql+fp2I3NsnKHA0MOSUTtfBAdNbzlykE6qpHNzzfPNFM4MspvACY8xZlki95GJhdrHY+PTT/LN+1Y1RkuX5xEBnBosf4hykNzk8C1gwLyRpx+P+eXfQPjpuy28ZIqGyJk50INupfJK25Vlo7xuPnk1dBS8Bn5taeLU2lcsYPfFaIR0DzCoDUD1znETIkEjjG3hU0hPbaIMRFj1xVWK8lqsfUcTLqvoqFF9VV4WhSLN+pydDBprUhcI+PU2+hHEmPzNAxATI03UUzszMLrx8/NEl+ooe+hpOCDTOIr8NjE5foY=ff",
+  "updated_at": "19.11.2026 11:04",
+  "config_count": 303
 }
