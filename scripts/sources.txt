@@ -4,3 +4,4 @@ https://sub.vlessfo.ru/vlessforu/working_configs.txt
 https://raw.githubusercontent.com/flaafix/AetrisVPN-black-list/refs/heads/main/configs.txt
 https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt
 https://raw.githack.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta8.json
+https://raw.githubusercontent.com/hussaroff/lte-universal-checked/refs/heads/main/whitelist.txt
