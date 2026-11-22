@@ -7,8 +7,8 @@
   "https://github.com/fag2548-pixel/FDDE-vpn/raw/refs/heads/main/Vpn%20config": "hash:6c4b2d07a818",
   "https://github.com/slxkware/Vless-list/raw/refs/heads/main/Black%20Vless.txt": "hash:0899d3764145",
   "https://github.com/svinakraft-maker/FlareFeed/raw/refs/heads/main/public/podpiska.txt": "hash:5ef8aae82bef",
-  "https://raw.githack.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta8.json": "hash:72086805654c",
-  "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt": "hash:8651e5be3340",
+  "https://raw.githack.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta8.json": "hash:bb69ce1d68d6",
+  "https://raw.githubusercontent.com/A-N-D-R-404/V-Merge.github.io/refs/heads/main/output/merged.txt": "hash:2241fff032bd",
   "https://raw.githubusercontent.com/Andrejewild/vless-free-keys-russia/refs/heads/main/sub.txt": "hash:d44f3bca23c6",
   "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/BLACK_LTE.txt": "hash:476492deffc0",
   "https://raw.githubusercontent.com/FLAT447/v2ray-lists/refs/heads/main/WHITE_LITE.txt": "hash:74847c9238c3",
@@ -25,7 +25,7 @@
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-13.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-14.txt": null,
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-15.txt": null,
-  "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-2.txt": "hash:6597ad30dbc8",
+  "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-2.txt": "hash:a901f4ccfd45",
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-3.txt": "hash:388da2cbce43",
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-4.txt": "hash:a4d0ba4b01de",
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-5.txt": "hash:ac31d76453f5",
@@ -42,5 +42,5 @@
   "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/default/all-secure.txt": null,
   "https://raw.githubusercontent.com/xenon-jpg/merge-vpn/refs/heads/main/merged.txt": "hash:66a13f863d0e",
   "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt": "hash:8f8c871e6cd6",
-  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:fb4b0558ffb7"
+  "https://sub.vlessfo.ru/vlessforu/working_configs.txt": "hash:49aaaabdd62f"
 }
