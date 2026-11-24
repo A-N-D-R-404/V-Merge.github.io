@@ -74,7 +74,11 @@ FORCE_REBUILD = False
 CHECK_ENABLED = True
 TH_MAX_WORKER = 10  # 🚀 10 одновременных проверок
 MAX_WORKING_LIMIT = 500  # 🎯 Лимит рабочих конфигов
-CHECK_TIMEOUT = 10  # секунд на HTTP-запрос через прокси
+CHECK_TIMEOUT = 18  # секунд на HTTP-запрос через прокси
+PROXY_TCP_TIMEOUT = 2.5  # секунд на TCP-подключение к локальному прокси
+XRAY_STARTUP_TIMEOUT = 8.0  # максимум секунд на открытие локального порта Xray
+DEAD_CACHE_MAX_FAILS = 3  # сколько раз подряд нода должна провалить проверку для попадания в кэш
+DEAD_CACHE_TTL_DAYS = 30  # срок жизни записей в dead_cache в днях
 CHECK_LOC = True  # определять страну для рабочих конфигов
 
 # 🌍 Расширенная карта флагов стран (ISO 3166-1 alpha-2)
@@ -170,26 +174,80 @@ def get_config_hash(link: str) -> str:
     return hashlib.md5(base_link.encode("utf-8")).hexdigest()
 
 
-def load_dead_cache() -> set:
+def _normalize_dead_entry(raw_entry: Any, now_ts: int) -> Optional[Dict[str, int]]:
+    if isinstance(raw_entry, dict):
+        fails = int(raw_entry.get("fails", 0))
+        last_check = int(raw_entry.get("last_check", now_ts))
+    elif isinstance(raw_entry, (int, float)):
+        fails = int(raw_entry)
+        last_check = now_ts
+    else:
+        return None
+    if fails <= 0:
+        return None
+    return {"fails": fails, "last_check": last_check}
+
+
+def load_dead_cache() -> Dict[str, Dict[str, int]]:
+    """Загружает кэш неудач {hash: {"fails": N, "last_check": ts}} и чистит просроченные записи."""
     if not DEAD_CACHE.exists():
-        return set()
+        return {}
+    now_ts = int(time.time())
+    ttl_seconds = DEAD_CACHE_TTL_DAYS * 86400
     try:
         data = json.loads(DEAD_CACHE.read_text(encoding="utf-8"))
-        return set(data)
+        result: Dict[str, Dict[str, int]] = {}
+        removed_expired = 0
+
+        if isinstance(data, dict):
+            for k, v in data.items():
+                entry = _normalize_dead_entry(v, now_ts)
+                if not entry:
+                    continue
+                if now_ts - entry["last_check"] > ttl_seconds:
+                    removed_expired += 1
+                    continue
+                result[str(k)] = entry
+        elif isinstance(data, list):
+            for h in data:
+                result[str(h)] = {
+                    "fails": DEAD_CACHE_MAX_FAILS,
+                    "last_check": now_ts,
+                }
+
+        if removed_expired > 0:
+            print(
+                f"[i] Удалено устаревших записей из {DEAD_CACHE.name} (> {DEAD_CACHE_TTL_DAYS} дн.): {removed_expired}"
+            )
+        return result
     except Exception as e:
         print(f"[!] Ошибка чтения dead_cache.json: {e}", file=sys.stderr)
-        return set()
+        return {}
 
 
-def save_dead_cache(dead_set: set):
-    """Гарантированно создает папку и сохраняет черный список."""
+def save_dead_cache(dead_map: Dict[str, Dict[str, int]]):
+    """Гарантированно создает папку и сохраняет счётчик нерабочих конфигов с меткой времени."""
     try:
         DEAD_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        now_ts = int(time.time())
+        cleaned: Dict[str, Dict[str, int]] = {}
+        for k, v in dead_map.items():
+            entry = _normalize_dead_entry(v, now_ts)
+            if entry:
+                cleaned[str(k)] = entry
+
         DEAD_CACHE.write_text(
-            json.dumps(sorted(list(dead_set)), ensure_ascii=False, indent=2),
+            json.dumps(cleaned, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        print(f"[✓] Черный список сохранен в {DEAD_CACHE.name} ({len(dead_set)} записей)")
+        blocked_count = sum(
+            1
+            for item in cleaned.values()
+            if item.get("fails", 0) >= DEAD_CACHE_MAX_FAILS
+        )
+        print(
+            f"[✓] Кэш неудач сохранен в {DEAD_CACHE.name} ({len(cleaned)} записей, заблокировано: {blocked_count})"
+        )
     except Exception as e:
         print(f"[!] Ошибка сохранения {DEAD_CACHE.name}: {e}", file=sys.stderr)
 
@@ -252,7 +310,7 @@ def parse_source_updated_at(text):
     if m:
         yy, mm, dd, hh, mi = m.groups()
         try:
-            return f"{int(yy):04d}-{int(mm):02d}-{int(dd):02d} {int(hh):02d}:{int(mi):02d}"
+            return f"{int(yy):04d}-{int(mm):02d}-{int(dd):02d} {hh:02d}:{mi:02d}"
         except Exception:
             return None
     return None
@@ -463,6 +521,27 @@ except Exception as e:
     CHECK_ENABLED = False
 
 
+def _get_real_ip() -> Optional[str]:
+    """Получает внешний IP раннера (без прокси) для сверки выхода через ноду."""
+    endpoints = [
+        ("https://api.ipify.org?format=json", lambda r: r.json().get("ip", "")),
+        ("https://ifconfig.me/ip", lambda r: r.text.strip()),
+        ("https://icanhazip.com", lambda r: r.text.strip()),
+        ("https://api.myip.com", lambda r: r.json().get("ip", "")),
+    ]
+    for url, extractor in endpoints:
+        for _ in range(2):
+            try:
+                r = requests.get(url, timeout=8)
+                if r.status_code == 200:
+                    ip = str(extractor(r)).strip()
+                    if ip and (ip.count(".") == 3 or ":" in ip):
+                        return ip
+            except Exception:
+                time.sleep(0.3)
+    return None
+
+
 class ProcessManager:
     """Управляет фоновыми процессами Xray/Hysteria."""
 
@@ -557,6 +636,28 @@ def _parse_query_params(query: str) -> Dict[str, str]:
     return params
 
 
+def _extract_host_port_from_uri(uri: str) -> tuple[str, int]:
+    """Извлекает address и port из URI с поддержкой IPv6 ([2001:db8::1]:443)."""
+    parsed = urllib.parse.urlparse(uri)
+    if parsed.hostname and parsed.port:
+        return parsed.hostname.strip("[]"), int(parsed.port)
+    if "@" in uri:
+        after = uri.split("@", 1)[1]
+        host_port = after.split("/", 1)[0].split("?", 1)[0].strip()
+        if host_port.startswith("["):
+            end_bracket = host_port.find("]")
+            if end_bracket != -1:
+                host = host_port[1:end_bracket]
+                rest = host_port[end_bracket + 1 :]
+                if rest.startswith(":") and rest[1:].isdigit():
+                    return host, int(rest[1:])
+        elif ":" in host_port:
+            h, p = host_port.rsplit(":", 1)
+            if p.isdigit():
+                return h.strip(), int(p)
+    return "", 0
+
+
 def parse_config_params(config: str) -> ConfigParams:
     config = urllib.parse.unquote(config.strip())
     main_config, _, tag = config.partition("#")
@@ -583,48 +684,51 @@ def parse_config_params(config: str) -> ConfigParams:
         raise ValueError("Неизвестный протокол")
 
     common = {"protocol": protocol, "tag": tag}
+    addr, port = _extract_host_port_from_uri(main_config)
 
     if protocol in ("vless", "trojan"):
-        m = re.search(r"([^:]+)@([^:]+):(\d+)", main_config)
-        if m:
-            common.update(
-                {
-                    "id": m.group(1).replace("//", "")
-                    if protocol != "trojan"
-                    else "",
-                    "address": m.group(2),
-                    "port": int(m.group(3)),
-                }
-            )
+        user_info = ""
+        if "@" in main_config:
+            prefix = main_config.split("@", 1)[0]
+            user_info = prefix.split("://", 1)[1] if "://" in prefix else prefix
+        common.update(
+            {
+                "id": user_info if protocol == "vless" else "",
+                "address": addr,
+                "port": port,
+            }
+        )
     elif protocol == "wireguard":
-        m = re.search(r"([^@]+)@([^:]+):(\d+)", main_config)
-        if m:
-            common.update(
-                {
-                    "wg_secret_key": m.group(1).split("wireguard://")[1],
-                    "address": m.group(2),
-                    "port": int(m.group(3)),
-                }
-            )
+        secret_key = ""
+        if "@" in main_config:
+            prefix = main_config.split("@", 1)[0]
+            secret_key = prefix.split("://", 1)[1] if "://" in prefix else prefix
+        common.update(
+            {
+                "wg_secret_key": secret_key,
+                "address": addr,
+                "port": port,
+            }
+        )
     elif protocol in ("hy2", "hysteria2"):
-        m = re.search(rf"{protocol}://([^@]+)@([^:/?#]+):(\d+)", main_config)
-        if m:
-            common.update(
-                {
-                    "ss_password": m.group(1),
-                    "address": m.group(2),
-                    "port": int(m.group(3)),
-                }
-            )
+        pwd = ""
+        if "@" in main_config:
+            prefix = main_config.split("@", 1)[0]
+            pwd = prefix.split("://", 1)[1] if "://" in prefix else prefix
+        common.update(
+            {
+                "ss_password": pwd,
+                "address": addr,
+                "port": port,
+            }
+        )
     else:
-        m = re.search(r"@([^:]+):(\d+)", main_config)
-        if m:
-            common.update(
-                {
-                    "address": m.group(1),
-                    "port": int(m.group(2)),
-                }
-            )
+        common.update(
+            {
+                "address": addr,
+                "port": port,
+            }
+        )
 
     if protocol == "vless":
         query = main_config.split("?", 1)[1] if "?" in main_config else ""
@@ -676,7 +780,7 @@ def parse_config_params(config: str) -> ConfigParams:
             raise ValueError("Битый vmess-конфиг")
         return ConfigParams(
             protocol="vmess",
-            address=vm.get("add", ""),
+            address=str(vm.get("add", "")).strip("[]"),
             port=int(vm.get("port", 0)),
             tag=vm.get("ps", ""),
             security=vm.get("tls", ""),
@@ -695,8 +799,10 @@ def parse_config_params(config: str) -> ConfigParams:
     if protocol == "trojan":
         query = main_config.split("?", 1)[1] if "?" in main_config else ""
         p = _parse_query_params(query)
-        m = re.search(r"trojan://([^@]+)@", main_config)
-        pwd = m.group(1) if m else ""
+        pwd = ""
+        if "@" in main_config:
+            prefix = main_config.split("@", 1)[0]
+            pwd = prefix.split("://", 1)[1] if "://" in prefix else prefix
         host_params = {
             "tcp": p.get("host"),
             "ws": p.get("host"),
@@ -759,9 +865,14 @@ def parse_config_params(config: str) -> ConfigParams:
                 auth = base64.b64decode(auth + "=" * (-len(auth) % 4)).decode()
                 if ":" in auth:
                     method, password = auth.split(":", 1)
-                if ":" in server:
-                    address, port = server.rsplit(":", 1)
-                    port = int(port)
+                server_clean = server.split("?", 1)[0]
+                parsed_addr, parsed_port = _extract_host_port_from_uri(
+                    f"ss://{server_clean}"
+                )
+                if parsed_addr:
+                    address = parsed_addr
+                if parsed_port:
+                    port = parsed_port
             else:
                 dec = base64.b64decode(
                     main_part + "=" * (-len(main_part) % 4)
@@ -770,9 +881,14 @@ def parse_config_params(config: str) -> ConfigParams:
                     auth, server = dec.split("@", 1)
                     if ":" in auth:
                         method, password = auth.split(":", 1)
-                    if ":" in server:
-                        address, port = server.rsplit(":", 1)
-                        port = int(port)
+                    server_clean = server.split("?", 1)[0]
+                    parsed_addr, parsed_port = _extract_host_port_from_uri(
+                        f"ss://{server_clean}"
+                    )
+                    if parsed_addr:
+                        address = parsed_addr
+                    if parsed_port:
+                        port = parsed_port
         except Exception:
             raise ValueError("Битый ss-конфиг")
         common.update({"address": address, "port": port})
@@ -1244,27 +1360,55 @@ def build_xray_config(params: ConfigParams, local_port: int) -> str:
     return json.dumps(config, indent=4)
 
 
-def start_xray(conf_path: Path, idx: int):
+def start_xray(conf_path: Path, idx: int, err_log_path: Optional[Path] = None) -> subprocess.Popen:
     if not XRAY_BIN.exists():
         raise FileNotFoundError(f"Xray не найден: {XRAY_BIN}")
-    proc = subprocess.Popen(
-        [str(XRAY_BIN), "run", "-c", str(conf_path)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    stderr_target = (
+        open(err_log_path, "wb") if err_log_path is not None else subprocess.DEVNULL
     )
+    try:
+        proc = subprocess.Popen(
+            [str(XRAY_BIN), "run", "-c", str(conf_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_target,
+        )
+    finally:
+        if stderr_target is not subprocess.DEVNULL:
+            stderr_target.close()
     process_manager.add_process(f"xray_{idx}", proc.pid)
+    return proc
 
 
-def start_hy2(yaml_path: Path, idx: int):
+def start_hy2(yaml_path: Path, idx: int, err_log_path: Optional[Path] = None) -> subprocess.Popen:
     if not HY2_BIN.exists():
         raise FileNotFoundError(f"Hysteria не найден: {HY2_BIN}")
-    proc = subprocess.Popen(
-        [str(HY2_BIN), "client", "-c", str(yaml_path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    stderr_target = (
+        open(err_log_path, "wb") if err_log_path is not None else subprocess.DEVNULL
     )
+    try:
+        proc = subprocess.Popen(
+            [str(HY2_BIN), "client", "-c", str(yaml_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_target,
+        )
+    finally:
+        if stderr_target is not subprocess.DEVNULL:
+            stderr_target.close()
     process_manager.add_process(f"hysteria_{idx}", proc.pid)
+    return proc
+
+
+def _read_stderr_tail(err_log_path: Optional[Path], max_chars: int = 300) -> str:
+    if not err_log_path or not err_log_path.exists():
+        return ""
+    try:
+        content = err_log_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not content:
+            return ""
+        return content[-max_chars:].replace("\n", " | ")
+    except Exception:
+        return ""
 
 
 def build_hy2_yaml(params: ConfigParams, local_port: int) -> dict:
@@ -1321,30 +1465,105 @@ def _get_http_port() -> int:
     return cfg["core"]["inbound_ports"]["http"]
 
 
-def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
+def _wait_for_port(
+    host: str, port: int, timeout: float, proc: Optional[subprocess.Popen] = None
+) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.2)
+    return False
+
+
+def _verify_proxy_response(
+    resp: requests.Response,
+    real_ip: Optional[str] = None,
+    proxy_url: Optional[str] = None,
+) -> bool:
+    """
+    Проверяет, что ответ валиден и не похож на прямой обход прокси.
+    Если real_ip неизвестен, делает дополнительный запрос к generate_204
+    через тот же прокси, чтобы подтвердить, что прокси реально работает.
+    """
+    if resp.status_code not in (200, 204):
+        return False
+    body = (resp.text or "").strip()
+    if resp.status_code == 200 and not body:
+        return False
+    if body:
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and "ip" in data:
+                proxy_ip = str(data.get("ip", "")).strip()
+                if not proxy_ip:
+                    return False
+                if real_ip and proxy_ip == real_ip:
+                    # IP совпал с реальным — прокси не сработал
+                    return False
+                if not real_ip:
+                    # Не можем сверить IP — делаем fallback-проверку через 204
+                    if proxy_url:
+                        try:
+                            test = requests.get(
+                                "http://cp.cloudflare.com/generate_204",
+                                proxies={"http": proxy_url, "https": proxy_url},
+                                timeout=8,
+                                headers={"Connection": "close"},
+                            )
+                            return test.status_code == 204
+                        except Exception:
+                            return False
+                    return False
+        except ValueError:
+            pass
+    return True
+
+
+def check_one_config(
+    link: str, idx: int, total: int, real_ip: Optional[str] = None
+) -> str:
+    """
+    Возвращает:
+    - "ok": рабочий конфиг
+    - "dead": нода недоступна / провалила сетевую проверку
+    - "error": ошибка парсинга или запуска локального процесса (не должна «залипать» в dead_cache)
+    """
     print(f"[{idx + 1}/{total}] 🔍 Проверяется узел: {link[:50]}...")
 
     if not CHECK_ENABLED or not TEST_URL:
         print(f"[{idx + 1}/{total}] ⚠️ Проверка отключена или нет TEST_URL")
-        return link
+        return "ok"
+
+    params: Optional[ConfigParams] = None
+    local_port = (idx % 50) + 2
+    xray_conf_path = XRAY_TMP_DIR / f"check_{idx}.json"
+    hy2_yaml_path = HY2_TMP_DIR / f"check_{idx}.yaml"
+    xray_err_path = XRAY_TMP_DIR / f"check_{idx}.err.log"
+    hy2_err_path = HY2_TMP_DIR / f"check_{idx}_hy2.err.log"
 
     try:
-        params = parse_config_params(link)
-        if not params.address or not params.port:
-            print(
-                f"[{idx + 1}/{total}] ❌ Пропуск: не удалось извлечь address/port"
-            )
-            return None
+        try:
+            params = parse_config_params(link)
+            if not params.address or not params.port:
+                print(
+                    f"[{idx + 1}/{total}] ❌ Пропуск: не удалось извлечь address/port"
+                )
+                return "error"
+        except Exception as e:
+            print(f"[{idx + 1}/{total}] ❌ Ошибка парсинга конфига: {e}")
+            return "error"
 
-        local_port = (idx % 50) + 2
-        xray_conf_path = XRAY_TMP_DIR / f"check_{idx}.json"
-        hy2_yaml_path = HY2_TMP_DIR / f"check_{idx}.yaml"
-
+        hy2_proc: Optional[subprocess.Popen] = None
         if params.protocol in ("hy2", "hysteria2"):
             hy2_yaml = build_hy2_yaml(params, local_port)
             with open(hy2_yaml_path, "w") as f:
                 yaml.dump(hy2_yaml, f)
-            start_hy2(hy2_yaml_path, idx)
+            hy2_proc = start_hy2(hy2_yaml_path, idx, hy2_err_path)
             socks_params = ConfigParams(
                 protocol="socks",
                 address=f"127.0.0.{local_port}",
@@ -1360,13 +1579,37 @@ def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
 
         with open(xray_conf_path, "w") as f:
             f.write(xray_conf)
-        start_xray(xray_conf_path, idx)
+        xray_proc = start_xray(xray_conf_path, idx, xray_err_path)
 
-        time.sleep(2.5)
+        local_host = f"127.0.0.{local_port}"
+        http_port = _get_http_port()
+        port_ready = _wait_for_port(
+            local_host, http_port, XRAY_STARTUP_TIMEOUT, proc=xray_proc
+        )
 
+        if not port_ready or xray_proc.poll() is not None:
+            err_tail = _read_stderr_tail(xray_err_path) or _read_stderr_tail(
+                hy2_err_path
+            )
+            extra = f" ({err_tail})" if err_tail else ""
+            print(
+                f"[{idx + 1}/{total}] ❌ Локальный порт {local_host}:{http_port} не поднялся{extra}"
+            )
+            return "dead"
+
+        try:
+            with socket.create_connection(
+                (local_host, http_port), timeout=PROXY_TCP_TIMEOUT
+            ):
+                pass
+        except OSError:
+            print(f"[{idx + 1}/{total}] ❌ Таймаут TCP к локальному прокси")
+            return "dead"
+
+        proxy_url = f"http://{local_host}:{http_port}"
         proxies = {
-            "http": f"http://127.0.0.{local_port}:{_get_http_port()}",
-            "https": f"http://127.0.0.{local_port}:{_get_http_port()}",
+            "http": proxy_url,
+            "https": proxy_url,
         }
         try:
             r = requests.get(
@@ -1375,35 +1618,40 @@ def check_one_config(link: str, idx: int, total: int) -> Optional[str]:
                 timeout=CHECK_TIMEOUT,
                 headers={"Connection": "close"},
             )
-            ok = r.status_code in (200, 204)
+            ok = _verify_proxy_response(
+                r, real_ip=real_ip, proxy_url=proxy_url
+            )
         except Exception:
             ok = False
 
-        for p in (xray_conf_path, hy2_yaml_path):
+        if ok:
+            print(f"[{idx + 1}/{total}] ✅ Успешно рабочий узел")
+            return "ok"
+        else:
+            err_tail = _read_stderr_tail(xray_err_path) or _read_stderr_tail(
+                hy2_err_path
+            )
+            extra = f" | log: {err_tail}" if err_tail else ""
+            print(
+                f"[{idx + 1}/{total}] ❌ Недоступен / Ошибка соединения{extra}"
+            )
+            return "dead"
+
+    except Exception as e:
+        print(f"[{idx + 1}/{total}] ❌ Ошибка проверки: {e}")
+        return "error"
+    finally:
+        for p in (xray_conf_path, hy2_yaml_path, xray_err_path, hy2_err_path):
             try:
                 p.unlink()
             except Exception:
                 pass
-
-        if params.protocol in ("hy2", "hysteria2"):
-            process_manager.stop_process(f"hysteria_{idx}")
-        process_manager.stop_process(f"xray_{idx}")
-
-        if ok:
-            print(f"[{idx + 1}/{total}] ✅ Успешно рабочий узел")
-            return link
-        else:
-            print(f"[{idx + 1}/{total}] ❌ Недоступен / Ошибка соединения")
-            return None
-
-    except Exception as e:
-        print(f"[{idx + 1}/{total}] ❌ Ошибка проверки: {e}")
         try:
+            if params and params.protocol in ("hy2", "hysteria2"):
+                process_manager.stop_process(f"hysteria_{idx}")
             process_manager.stop_process(f"xray_{idx}")
-            process_manager.stop_process(f"hysteria_{idx}")
         except Exception:
             pass
-        return None
 
 
 def check_configs(links: List[str]) -> List[str]:
@@ -1416,10 +1664,11 @@ def check_configs(links: List[str]) -> List[str]:
     filtered_links = []
     skipped_count = 0
 
-    # 1. Отсеиваем ранее выявленные нерабочие узлы
+    # 1. Отсеиваем конфиги, набравшие порог неудач в чёрном списке
     for link in links:
         cfg_hash = get_config_hash(link)
-        if cfg_hash in dead_cache:
+        fails = dead_cache.get(cfg_hash, {}).get("fails", 0)
+        if fails >= DEAD_CACHE_MAX_FAILS:
             skipped_count += 1
         else:
             filtered_links.append(link)
@@ -1433,12 +1682,21 @@ def check_configs(links: List[str]) -> List[str]:
         save_dead_cache(dead_cache)
         return []
 
+    real_ip = _get_real_ip()
+    if real_ip:
+        print(f"[i] Внешний IP раннера для сверки прокси: {real_ip}")
+    else:
+        print(
+            "[!] Не удалось определить внешний IP раннера (при проверке IP будет использован fallback через generate_204)"
+        )
+
     print(
         f"\n🚀 Запуск проверки {total} конфигураций (цель: {MAX_WORKING_LIMIT} рабочих) в {TH_MAX_WORKER} потоков...\n"
     )
 
     working = []
     stop_event = threading.Event()
+    now_ts = int(time.time())
 
     try:
         with ThreadPoolExecutor(max_workers=TH_MAX_WORKER) as executor:
@@ -1446,21 +1704,24 @@ def check_configs(links: List[str]) -> List[str]:
             for i, link in enumerate(filtered_links):
                 if stop_event.is_set():
                     break
-                fut = executor.submit(check_one_config, link, i, total)
+                fut = executor.submit(check_one_config, link, i, total, real_ip)
                 futures[fut] = link
 
             for fut in as_completed(futures):
                 link = futures[fut]
                 if stop_event.is_set():
-                    continue
+                    break
                 try:
-                    res = fut.result()
+                    status = fut.result()
                 except Exception as e:
                     print(f"[!] Ошибка future: {e}")
-                    res = None
+                    status = "error"
 
-                if res is not None:
-                    working.append(res)
+                cfg_hash = get_config_hash(link)
+
+                if status == "ok":
+                    dead_cache.pop(cfg_hash, None)
+                    working.append(link)
                     print(
                         f"🎯 Набрано рабочих конфигов: {len(working)}/{MAX_WORKING_LIMIT}"
                     )
@@ -1472,15 +1733,26 @@ def check_configs(links: List[str]) -> List[str]:
                         stop_event.set()
                         for f in futures:
                             f.cancel()
-                        executor.shutdown(wait=False, cancel_futures=True)
                         break
+                elif status == "dead":
+                    prev_fails = dead_cache.get(cfg_hash, {}).get("fails", 0)
+                    dead_cache[cfg_hash] = {
+                        "fails": prev_fails + 1,
+                        "last_check": now_ts,
+                    }
                 else:
-                    dead_cache.add(get_config_hash(link))
+                    # "error": ошибка парсинга/запуска — счётчик не увеличиваем
+                    pass
     finally:
         save_dead_cache(dead_cache)
 
+    blocked_total = sum(
+        1
+        for item in dead_cache.values()
+        if item.get("fails", 0) >= DEAD_CACHE_MAX_FAILS
+    )
     print(
-        f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Записей в черном списке: {len(dead_cache)}"
+        f"\n🎉 Проверка завершена! Рабочих конфигов: {len(working)} | Записей в черном списке: {blocked_total}"
     )
     return working
 
