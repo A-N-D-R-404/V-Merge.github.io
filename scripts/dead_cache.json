@@ -31927,6 +31927,10 @@
     "fails": 3,
     "last_check": 1795540172
   },
+  "40149cc4885f27d528ae1a4319cffee2": {
+    "fails": 1,
+    "last_check": 1795633274
+  },
   "4014a2a69ab8fb613b47665e4aef149c": {
     "fails": 3,
     "last_check": 1795540172
@@ -122418,6 +122422,10 @@
   "f699ef21b34ad3094f71c616aa1d457e": {
     "fails": 3,
     "last_check": 1795540172
+  },
+  "f69a7c020b1cc269e876a7a27ab8595b": {
+    "fails": 1,
+    "last_check": 1795633274
   },
   "f69bfe4b0e74c71eeab5ea86da45dd33": {
     "fails": 3,
